@@ -4,33 +4,35 @@ Orden pensado para que **haya algo usable en la fase 2** y todo lo demás se apo
 
 ---
 
-## Fase 0 — Andamiaje
+## Fase 0 — Andamiaje ✅ (2026-09-16)
 
-- [ ] `npx create-expo-app@latest invoicer --template` con TypeScript y expo-router.
-- [ ] Dependencias: `axios`, `zustand`, `@tanstack/react-query`, `expo-secure-store`,
-      `@react-native-async-storage/async-storage`, `react-hook-form`, `zod`, `dayjs`,
-      `expo-font`, `expo-print`, `expo-sharing`, `@expo/vector-icons`.
-- [ ] `.env` con `EXPO_PUBLIC_*` → [01](01-arquitectura.md). `.env` al `.gitignore`;
-      `.env.example` versionado.
-- [ ] `theme/` con los tokens de [05](05-diseno-y-tema.md) + `ThemeProvider` + `useTheme`.
-- [ ] Fuentes: TTF estáticos de Google Sans Flex → [13](13-recursos-de-marca.md).
-- [ ] `lib/api/client.ts` con los interceptores de [02](02-api-y-fetch.md).
-- [ ] `types/api.ts` a partir de [03](03-modelo-de-datos.md).
-- [ ] `lib/tax.ts`, `lib/format.ts` y `lib/money.ts` (las dos conversiones de moneda, con test
-      por dirección → [08](08-reglas-de-negocio.md) §11).
-
-**Se termina cuando:** la app arranca, muestra una pantalla con los colores de PayBille en claro y
-oscuro, y con la tipografía correcta.
+- [x] Proyecto KMP: `composeApp` (Android + iOS) + `androidApp` + `iosApp` (Xcode).
+- [x] Dependencias: Compose MP, Koin, Voyager, Ktor, kotlinx.serialization, Room KMP, BuildKonfig
+      → [01](01-arquitectura.md).
+- [x] `local.properties` con `paybille.apiKey` (no se versiona).
+- [x] Tema: tokens de [05](05-diseno-y-tema.md), `PbTheme`, tipografía, respuesta al toque.
+- [x] Fuentes: 4 TTF estáticos de Google Sans Flex → [13](13-recursos-de-marca.md).
+- [x] Iconos Material Symbols Rounded (vectores; desde el 2026-09-18, la fuente).
+- [x] `core/network` con el cliente, errores tipados y serializadores tolerantes.
+- [x] Pruebas de contrato con la API en `commonTest`.
+- [ ] Icono de la app y pantalla de arranque (se quitó el icono prestado de la plantilla).
+- [ ] `core/billing/Tax.kt` y `Money.kt` (las dos conversiones de moneda, con prueba por
+      dirección → [08](08-reglas-de-negocio.md) §11). Pasan a la fase 2, donde se usan.
 
 ---
 
-## Fase 1 — Sesión
+## Fase 1 — Sesión ✅ (2026-09-16, pendiente de verificar en dispositivo)
 
-- [ ] Pantalla de login (usuario/contraseña, con el `key` de la API en el body).
-- [ ] Token en SecureStore + cascada `persons → roles → markets → Settings`.
-- [ ] `useSession` con `taxRate()` normalizado.
-- [ ] Arranque: con token → pestañas; sin token → login. Cerrar sesión.
-- [ ] Manejo del token caducado (401 → logout limpio, sin pantalla en blanco).
+- [x] Pantalla de login (usuario/contraseña, `key` de la API en el body).
+- [x] **Login multitienda en dos fases** (`requiresMarket`), que la documentación anterior no
+      contemplaba.
+- [x] Sesión en Room + cascada `persons · roles · markets · Settings` en paralelo.
+- [x] `Session.defaultTaxRate` normalizado.
+- [x] Arranque: con sesión → Inicio; sin sesión → login. Cerrar sesión con confirmación.
+- [x] **La sesión no vence** (decisión del 2026-09-16): un 401/403 **no** cierra sesión; sustituye
+      al "401 → logout limpio" que había aquí.
+- [x] Refresco del perfil en segundo plano, con aviso de "sin conexión".
+- [ ] Verificación en Android y en iOS (Xcode) por el usuario.
 
 **Se termina cuando:** el usuario entra con su cuenta de PayBille y ve el nombre de su tienda.
 
@@ -38,20 +40,32 @@ oscuro, y con la tipografía correcta.
 
 ## Fase 2 — Facturar (**el MVP de verdad**)
 
-- [ ] `useDraftInvoice` persistido en AsyncStorage.
-- [ ] Buscador de productos sobre `warehouse` (`like` + paginación).
-- [ ] Editor de factura completo → [07](07-navegacion-y-pantallas.md).
-- [ ] Selector de **tasa de impuesto** y de **moneda + tasa de cambio** en los Totales.
-      Al guardar: importes en **moneda base**; moneda y tasa se archivan en AsyncStorage contra
-      el `id` de la venta, que es lo único que permite reimprimir el PDF.
-- [ ] `lib/tax.ts` conectado a `<ResumenTotales>`.
-- [ ] Guardado con la secuencia de 8 pasos de [02](02-api-y-fetch.md), con reintento y borrador
-      a salvo si falla.
-- [ ] Descuento de inventario + `reportInventory`, con **aviso saltable** si no alcanza la
+Adelantado el 2026-09-16, a petición del usuario:
+
+- [x] **Inicio con pestañas Todas / Ventas / Cotizaciones**, leyendo de Room (tabla `sales`,
+      migración 1→2) y paginando desde la API con `Gasto IS NULL`.
+- [x] `formatMoney` (`$ 1,250.00`) y fecha corta en la zona del negocio.
+- [x] Perfil aparte (tienda, sincronización, cerrar sesión).
+- [x] Barra inferior, botón "+" y vencimientos en las filas (ver [07](07-navegacion-y-pantallas.md)).
+
+- [x] Borrador de factura en Room, y **cola de envíos** para lo que se haga sin red.
+- [x] Buscador de productos (`productinventory/sales` + paginación) y de clientes.
+- [x] Editor de factura y cotización → [07](07-navegacion-y-pantallas.md).
+- [x] Selector de **tasa de impuesto** y de **moneda + tasa de cambio** en los Totales.
+      Al guardar: importes en **moneda base**; moneda y tasa se archivan en Room contra el `id`
+      de la venta, que es lo único que permite reimprimir el PDF.
+- [x] `core/billing/Tax.kt` y `Money.kt`, con pruebas, conectados a los Totales.
+- [x] Guardado con la secuencia de pasos de [02](02-api-y-fetch.md), con reintento sin duplicados
+      (`InvoiceSender`, progreso guardado paso a paso).
+- [x] Descuento de inventario + `reportInventory` + garantía, con **aviso** si no alcanza la
       existencia (puede quedar negativa) → [08](08-reglas-de-negocio.md) §4.
-- [ ] Lista de facturas con filtros por estatus y **`Gasto IS NULL`**.
-- [ ] Detalle de factura.
-- [ ] Compartir PDF por WhatsApp (`expo-print` + `expo-sharing`).
+- [ ] Moneda y tasa archivadas contra el `id` de la venta (el PDF del servidor sale en pesos).
+- [x] Alta rápida de cliente y de producto desde los buscadores (2026-09-18).
+- [ ] Buscar productos y clientes sin conexión **en los buscadores del editor** (los destinos
+      Productos y Clientes ya buscan en Room desde el 2026-09-18; los buscadores aún van a la red).
+- [x] Lista de facturas con filtros por estatus y **`Gasto IS NULL`** (en el Inicio).
+- [x] Detalle de factura con la "factura grande" (PDF del servidor) como protagonista.
+- [x] Compartir y descargar el PDF (hoja del sistema; Descargas / Archivos).
 
 **Se termina cuando:** el usuario factura desde el teléfono y la factura aparece igual en el POS.
 A partir de aquí la app ya sirve para algo, y todo lo demás se puede probar contra uso real.
@@ -60,10 +74,12 @@ A partir de aquí la app ya sirve para algo, y todo lo demás se puede probar co
 
 ## Fase 3 — Cobrar
 
-- [ ] `from-sale` al guardar una factura con saldo.
-- [ ] Pantalla de detalle con abonos y saldo.
-- [ ] Registrar abono (`{id}/payments`) con método, cuenta y referencia.
-- [ ] Pantalla **Saldos pendientes**: `accountdocs/byparty` (quién te debe y cuánto).
+- [x] `from-sale` al guardar una factura con saldo (y al abrir el detalle de una vieja).
+- [x] Pantalla de detalle con abonos, saldo y vencimiento.
+- [x] Registrar abono (`{id}/payments`) con método, cuenta y referencia (necesita red).
+- [x] Avisos locales de vencimiento y cobro → [07](07-navegacion-y-pantallas.md).
+- [ ] Cola de abonos sin red.
+- [x] Pantalla **Saldos pendientes**: `accountdocs/byparty` (Reportes, 2026-09-18).
 - [ ] Planes de cuotas: crear y ver el calendario.
 - [ ] Anular abono. **No es acción de administrador** (la app no tiene roles), pero sí
       destructiva: menú `⋯` y confirmación.
@@ -75,11 +91,12 @@ A partir de aquí la app ya sirve para algo, y todo lo demás se puede probar co
 
 ## Fase 4 — Inventario y clientes
 
-- [ ] Lista de existencias con aviso de stock bajo (`Amount <= MinAmountQty`).
-- [ ] Alta rápida: producto + warehouse en un solo formulario (como `ProductQuickCreate`).
-- [ ] Editar precio, costo y existencia, con su `reportInventory`.
+- [x] Lista de existencias con los tres estados (hay · agotado · negativa) — 2026-09-18.
+- [ ] Aviso de stock bajo (`Amount <= MinAmountQty`): `allgrouped` no trae `MinAmountQty` (petición 11).
+- [x] Alta rápida: producto + warehouse en un solo formulario (como `ProductQuickCreate`).
+- [x] Editar precio, costo y existencia, con su `reportInventory` (solo productos generales de un lote).
 - [ ] Ajuste manual de inventario (entrada/salida con motivo).
-- [ ] Clientes: lista, alta rápida, ficha con su saldo.
+- [x] Clientes: lista, alta rápida, ficha con su saldo y sus facturas.
 
 ---
 
@@ -89,7 +106,31 @@ A partir de aquí la app ya sirve para algo, y todo lo demás se puede probar co
 - [ ] Órdenes de compra: alta, "En camino", confirmar recepción, cuenta por pagar.
 - [ ] Notas de crédito y débito por la vía C (abono / documento en `accountdocs`), **con el aviso
       en pantalla de lo que esa vía no cubre**.
-- [ ] Cuentas de dinero: lista, balance y movimientos.
+- [x] Cuentas de dinero: lista, balance, movimientos y movimiento manual (2026-09-18).
+
+---
+
+## Seis destinos (2026-09-18, a petición del usuario)
+
+- [x] Barra: Facturas (principal) · Resumen · Productos · Clientes · Reportes · Bancos; el "+" en
+      todos → [07](07-navegacion-y-pantallas.md).
+- [x] Resumen = dashboard del POS (`dashboard/summary`).
+- [x] Reportes: ventas por fecha, productos vendidos, saldos pendientes, histórico del inventario.
+- [x] Iconos con la fuente Material Symbols Rounded (eje FILL) → [13](13-recursos-de-marca.md).
+- [ ] Rango de fechas personalizado en Reportes (hace falta un selector de fechas `Pb*`).
+- [ ] Exportar reportes (PDF o Excel).
+
+---
+
+## Cobro y catálogo (2026-09-27, a petición del usuario)
+
+- [x] "Dónde pagar" en la factura: varias cuentas + instrucciones, en el PDF (API `F4`).
+- [x] Titular y cédula/RNC en la cuenta (app, POS y API).
+- [x] Notificaciones: la campana de Facturas (vencidas, por vencer, sin enviar).
+- [x] Catálogo en línea: compartir el enlace y elegir qué productos salen (`IndShowOnCatalog`).
+- [x] Catálogo del POS con filtros de marca y color, disponibilidad y orden, estilo tienda.
+- [ ] **Ejecutar `F4_instrucciones_pago.sql`** en la base antes de desplegar la API.
+- [ ] Carrito y pagos en línea (Stripe, Azul, Cardnet) → [14](14-carrito-y-pagos-en-linea.md).
 
 ---
 
@@ -98,7 +139,7 @@ A partir de aquí la app ya sirve para algo, y todo lo demás se puede probar co
 - [ ] Estados vacíos con ilustración en todas las listas.
 - [ ] Tipografía grande del sistema (accesibilidad).
 - [ ] Icono de la app y pantalla de arranque con la marca PayBille.
-- [ ] Build con EAS y distribución interna para pruebas del usuario.
+- [ ] Firma y distribución interna (Android: APK/AAB firmado; iOS: TestFlight).
 
 ---
 
@@ -114,6 +155,13 @@ notan mucho.
 | 3 | **`GET /sales/{id}/full`** — factura con sus líneas, abonos y saldo en una llamada | Hoy son 3 llamadas para pintar un detalle |
 | 4 | Confirmar los valores reales de **`cuentas.Type`** | La documentación dice `Efectivo\|Banco\|Tarjeta`, el código filtra por `'Caja'` |
 | 5 | Un endpoint de **resumen del día** por `IdMarket` | La pantalla de Inicio hoy tendría que sumar en el cliente |
+| 7 | **Regenerar el PDF cuando cambia la factura** (`pdf.js → savePDF` lo guarda por nombre y lo devuelve siempre) | Tras un abono, el PDF compartido sigue diciendo "Pendiente" y el saldo viejo |
+| 8 | **`GET ventas/factura/{id}` sin token** | Cualquiera puede descargar cualquier factura probando ids. Debería pedir `auth` o usar el token público del QR |
+| 9 | **`from-sale` no debería crear documento para una venta pagada** (o un `accountdocs/by-sale/{id}` de solo lectura) | Hoy la app evita llamarlo en ventas pagadas para no crear un documento de más |
+| 10 | **`cuentas/{id}/movimientos` debería leer `page`/`pageSize` y fechas del cuerpo** (o el POS mandarlos como la app) | El POS enseña siempre los 10 movimientos más recientes, elija el rango que elija |
+| 11 | **`MinAmountQty` en `productinventory/allgrouped`** | Sin él, la lista de productos no puede avisar de "quedan pocos" |
+| 12 | **Registrar `report/fiscal` y `report/actualmonth` antes que `report/:isTorning`** (`routes/reports.js`, verificado) | Hoy las atiende la ruta genérica: "Ventas con NCF" del POS enseña la tabla vacía |
+| 13 | **`'Nomina'` sin tilde en `CreateCuenta.vue`** | El ENUM de `cuentas.Type` rechaza `'Nómina'`: crear una cuenta de nómina desde el POS falla |
 | 6 | **`Currency` (ISO 4217) + `ExchangeRate` en `sales`** | Hoy la moneda de emisión no se puede guardar: vive en el teléfono y se pierde al reinstalar. Es lo único que impide que el POS enseñe la factura como se emitió → [08](08-reglas-de-negocio.md) §11 |
 
 ## Decisiones de producto (cerradas el 2026-09-06)
@@ -123,7 +171,7 @@ porqué; la regla operativa vive en la guía que toca.
 
 | # | Decisión | Dónde se aplica |
 |---|---|---|
-| 1 | **Moneda base `$`** (DOP), separadores `es-DO` → `$ 1,250.00` | `lib/format.ts` → [04](04-estado-y-stores.md) |
+| 1 | **Moneda base `$`** (DOP), separadores `es-DO` → `$ 1,250.00` | `core/format/` → [04](04-estado-y-stores.md) |
 | 2 | **La app sí crea productos**: alta rápida con nombre, precio y cantidad, y código de barras automático | Fase 4 → [03](03-modelo-de-datos.md) |
 | 3 | **NCF apagado por defecto**, se activa factura a factura | [08](08-reglas-de-negocio.md) §5 |
 | 4 | **Vender sin existencia avisa pero deja pasar**; la existencia puede quedar negativa | [08](08-reglas-de-negocio.md) §4 |
@@ -152,10 +200,8 @@ acción de administrador) y la 5 (Compras y Cuentas se ven siempre).
 
 ### Efectos secundarios pendientes de resolver al programar
 
-1. **Venta a crédito + NCF apagado.** El POS fuerza el NCF cuando la venta es a crédito
-   (`completeOrder.vue:748`) pero puede pedirlo con `tipoNCF: ""`. Con el NCF apagado por
-   defecto, en Invoicer eso pasaría constantemente: **hay que preguntar el tipo antes de guardar
-   una factura a crédito** → [08](08-reglas-de-negocio.md) §5.
+1. ~~Venta a crédito + NCF apagado.~~ Resuelto: el POS no fuerza el NCF en las ventas a crédito
+   sino al pagar con tarjeta, y Invoicer no replica esa regla → [08](08-reglas-de-negocio.md) §5.
 2. **Inventario negativo en la UI.** La lista de existencias necesita un tercer estado además de
    "normal" y "stock bajo": **negativo**, que se resalta como aviso y no como error.
 3. **La moneda de emisión no tiene dónde vivir en el servidor** (petición 6). Hasta que exista,
@@ -163,5 +209,5 @@ acción de administrador) y la 5 (Compras y Cuentas se ven siempre).
    reinstala la app, esa factura se reimprime en moneda base. Hay que decirlo en pantalla al
    emitir en moneda extranjera, no descubrirlo tres meses después.
 4. **Impuesto y moneda son dos entradas nuevas al mismo cálculo**, y las dos llegan como string
-   desde un input. `Number()` en las dos, y las conversiones **solo** en `lib/money.ts`: la
-   dirección invertida no lanza error, solo produce un número creíble y equivocado.
+   desde un input. `toDoubleOrNull()` en las dos, y las conversiones **solo** en
+   `core/billing/Money.kt`: la dirección invertida no lanza error, solo produce un número creíble y equivocado.

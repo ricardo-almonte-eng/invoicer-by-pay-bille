@@ -4,7 +4,7 @@ App móvil de facturación para **negocios pequeños y vendedores independientes
 Dominicana. El hermano pequeño de **PayBille POS**: misma API, misma base de datos, misma
 identidad visual — pero en el bolsillo, no en el mostrador.
 
-> **Estado: documentación de arranque.** Todavía no hay código.
+> **Estado:** fase 1 — login y sesión. Pendiente de verificar en dispositivo.
 
 ## Qué hace
 
@@ -19,33 +19,44 @@ Lo que **no** hace: taller, turnos de caja, impresión térmica, restaurante. Es
 
 ## Stack
 
-React Native (Expo) · TypeScript · expo-router · Zustand · React Query · axios
+Kotlin Multiplatform (Android + iOS) · Compose Multiplatform con componentes propios · Koin ·
+Voyager · Ktor · Room · **offline first**
+
+Lógica y UI se comparten en `composeApp/src/commonMain`.
 
 ## Por dónde empezar
 
 1. Lee **[CLAUDE.md](CLAUDE.md)** — índice y reglas críticas.
-2. Lee **[documentacion/guidelines/00-vision-y-alcance.md](documentacion/guidelines/00-vision-y-alcance.md)**
-   — qué entra y qué no.
-3. Sigue la **[Fase 0 del plan](documentacion/guidelines/11-plan-de-implementacion.md)**.
-
-La documentación completa está en
-[`documentacion/guidelines/`](documentacion/guidelines/README.md) — 14 documentos que cubren desde
-el contrato con la API hasta los tokens de diseño.
+2. Lee **[00 — Visión y alcance](documentacion/guidelines/00-vision-y-alcance.md)** y
+   **[01 — Arquitectura](documentacion/guidelines/01-arquitectura.md)**.
+3. Sigue el **[plan](documentacion/guidelines/11-plan-de-implementacion.md)**.
 
 ## Configuración
 
-```bash
-cp .env.example .env    # y pide las credenciales al dueño del proyecto
-npm install
-npx expo start
+Crea `local.properties` en la raíz (no se versiona):
+
+```properties
+sdk.dir=C\:\\Users\\<usuario>\\AppData\\Local\\Android\\Sdk
+paybille.apiKey=<la API_KEY del .env del POS>
+# paybille.apiBaseUrl=https://api.paybille.com/ventex/api
 ```
 
-| Variable | Uso |
+| Clave | Uso |
 |---|---|
-| `EXPO_PUBLIC_BASE_URL` | API de negocio (`https://api.paybille.com/ventex/api`) |
-| `EXPO_PUBLIC_BASE_URL_GENERIC` | CRUD genérico |
-| `EXPO_PUBLIC_API_KEY` | Va en el body del login como `key` |
+| `paybille.apiKey` | Va en el body del login como `key` |
+| `paybille.apiBaseUrl` | Opcional. Por defecto la API de producción |
+
+## Ejecutar
+
+- **Android:** abre el proyecto en Android Studio y ejecuta la configuración `androidApp`.
+- **iOS:** en un Mac, abre `iosApp/iosApp.xcodeproj` en Xcode, pon tu `TEAM_ID` en
+  `iosApp/Configuration/Config.xcconfig` y ejecuta. Xcode llama a Gradle para compilar
+  `ComposeApp.framework`.
+
+```bash
+./gradlew :composeApp:testAndroidHostTest
+```
 
 ## Licencia
 
-Ver [LICENSE](LICENSE).
+Ver [LICENSE](LICENSE). Google Sans Flex: SIL OFL 1.1. Material Symbols: Apache 2.0.

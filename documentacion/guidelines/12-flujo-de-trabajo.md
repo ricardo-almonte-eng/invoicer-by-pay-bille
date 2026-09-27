@@ -39,16 +39,23 @@ correspondiente en la misma tarea**. No en la siguiente. La siguiente no llega.
 
 ### 4. Claude no ejecuta la aplicación
 
-**Nada de `npx expo start`, ni builds de EAS, ni abrir un simulador.** Arrancar, probar y verificar
-lo hace **el usuario**, en su dispositivo.
+**Nada de instalar la app, abrir un emulador o simulador, ni generar APK/IPA para distribuir.**
+Arrancar, probar y verificar lo hace **el usuario**, en su dispositivo.
 
 Al terminar un cambio: entrega el resumen, di **exactamente qué hay que mirar** y en qué
 condiciones (tema oscuro, pantalla pequeña, teclado abierto…). Si necesitas confirmar algo que solo
 se ve en ejecución, **pídeselo**; no lo supongas y no lo des por hecho en el resumen.
 
-Lo que Claude **sí** puede hacer sin ejecutar la app: comprobar tipos (`tsc --noEmit`), lint,
-revisar que los tokens de tema usados existan, y verificar que los nombres de campo coincidan con
-[03](03-modelo-de-datos.md).
+Lo que Claude **sí** puede hacer sin ejecutar la app — es el equivalente al `tsc --noEmit` de
+antes:
+
+```bash
+./gradlew :composeApp:compileAndroidMain :androidApp:compileDebugKotlin   # compilar
+./gradlew :composeApp:testAndroidHostTest                                 # pruebas de commonTest
+```
+
+**iOS no compila en Windows** (Kotlin/Native para Apple exige macOS). El código de `iosMain` se
+escribe con cuidado y se marca como *pendiente de verificar en Xcode* en el resumen.
 
 ### 5. La verificación visual se pide explícita
 

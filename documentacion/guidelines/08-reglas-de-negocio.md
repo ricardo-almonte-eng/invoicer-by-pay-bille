@@ -10,24 +10,27 @@ Las que rompen cosas en silencio van primero.
 - **La tasa se elige al crear la factura** (decisión de producto, 2026-09-06). El editor la
   muestra prellenada con la del negocio y el usuario la cambia si esa factura lleva otra. Vive en
   el **borrador**, no en `Settings`: cambiarla en una factura **no** cambia la siguiente.
-- **Siempre `Number()`.** La API la devuelve como string (`"0.18"`), y `1 + "0.18"` **concatena**
-  (`"10.18"`), rompiendo el cálculo de impuesto incluido sin lanzar ningún error. La
-  multiplicación coacciona; la suma no. Es el bug más caro de este dominio.
+- **Siempre normalizada a `Double`.** La API la devuelve como string (`"0.18"`). En el POS
+  (JavaScript) `1 + "0.18"` **concatena** (`"10.18"`); en Kotlin no compila, pero la trampa
+  cambia de forma: un `toDouble()` a mano en una pantalla revienta con `"18 %"` o con `""`. Por
+  eso se normaliza **en el borde**, una sola vez, con `LenientDoubleSerializer`
+  (`core/network/LenientSerializers.kt`), y la sesión ya expone un `Double?`.
 - **Nunca hardcodees `0.18`**, tampoco ahora que es editable: el valor inicial sale siempre de
-  `market.taxValue`. Y el campo del editor devuelve **string**, así que la trampa del `Number()`
-  ahora tiene dos entradas, no una.
+  `market.taxValue`. Y el campo del editor devuelve **string**, así que la conversión ahora
+  tiene dos entradas, no una: la del editor se valida con `toDoubleOrNull()` y nunca con
+  `toDouble()`.
 
-```ts
-// stores/session.ts — de aquí sale el valor POR DEFECTO
-taxRate: () => Number(get().market?.taxValue ?? 0.18)
+```kotlin
+// feature/auth/domain/Session.kt — de aquí sale el valor POR DEFECTO (ya existe)
+val defaultTaxRate: Double get() = store?.taxValue ?: DEFAULT_TAX_RATE   // 0.18
 
-// stores/draft.ts — la tasa EFECTIVA de la factura que se está creando
-taxRate: Number(useSession.getState().taxRate()),   // editable en el editor
+// borrador de factura (fase 2) — la tasa EFECTIVA de la factura que se está creando
+val taxRate: Double = session.defaultTaxRate   // editable en el editor
 ```
 
-**La tasa efectiva se lee del borrador, no de la sesión.** `lib/tax.ts` ya la recibe por
-parámetro (`lineTotals(l, taxType, tasa)`), así que las fórmulas no cambian: cambia **quién** le
-pasa el número.
+**La tasa efectiva se lee del borrador, no de la sesión.** `core/billing/Tax.kt` la recibe por
+parámetro (`lineTotals(line, taxType, rate)`), así que las fórmulas no cambian: cambia **quién**
+le pasa el número.
 
 ⚠️ **La API guarda el importe, no el porcentaje.** `sales.Tax` y `salesProducts.Tax` son importes
 y no hay columna para la tasa. No se pierde información —se reconstruye con `Tax / SubTotal`— y
@@ -37,7 +40,7 @@ API**: si hay que mostrarlo en el detalle, se recalcula.
 - El **rango aceptado es 0–100 %**. Un `0` es legítimo (equivale a `no_tax` en la práctica, pero
   sin cambiar `taxType`); rechaza negativos y mayores que 100.
 
-### Las tres fórmulas — `lib/tax.ts`, y solo ahí
+### Las tres fórmulas — `core/billing/Tax.kt`, y solo ahí
 
 `taxType` decide. Son las mismas de `stores/components/cart.js → recalcTotals()` y de
 `stores/data/accountDocs.js → lineTotals()`, que ya coinciden con el backend:
@@ -48,18 +51,27 @@ API**: si hay que mostrarlo en el detalle, se recalcula.
 | `included` | `base − impuesto` | `base − base/(1+tasa)` | `base` (**no se incrementa**) |
 | `no_tax` | `base` | `0` | `base − descuento` |
 
-```ts
-export function lineTotals(l: Linea, taxType: TaxType, tasa: number) {
-  const bruto = round2(Number(l.Amount) * Number(l.Price) - Number(l.Discount ?? 0));
-  if (taxType === 'no_tax')  return { subtotal: bruto, tax: 0, total: bruto };
-  if (taxType === 'included') {
-    const sub = round2(bruto / (1 + tasa));
-    return { subtotal: sub, tax: round2(bruto - sub), total: bruto };
-  }
-  const tax = round2(bruto * tasa);
-  return { subtotal: bruto, tax, total: round2(bruto + tax) };
+```kotlin
+fun lineTotals(line: DraftLine, taxType: TaxType, rate: Double): LineTotals {
+    val gross = round2(line.amount * line.price - line.discount)
+    return when (taxType) {
+        TaxType.NoTax -> LineTotals(subtotal = gross, tax = 0.0, total = gross)
+        TaxType.Included -> {
+            val sub = round2(gross / (1 + rate))
+            LineTotals(subtotal = sub, tax = round2(gross - sub), total = gross)
+        }
+        TaxType.WithTax -> {
+            val tax = round2(gross * rate)
+            LineTotals(subtotal = gross, tax = tax, total = round2(gross + tax))
+        }
+    }
 }
 ```
+
+`round2` replica el del backend (`services/accountDocuments.js:49`):
+`Math.round((v + Number.EPSILON) * 100) / 100`. `Math.round` de JavaScript lleva el `.5` hacia
+arriba; **`kotlin.math.round` lo lleva al par** y descuadra céntimos contra el POS. Usa
+`floor(x * 100 + 0.5) / 100` (con el mismo épsilon), no `round()`.
 
 Redondea **a dos decimales por línea**, no al final: es lo que hace el backend, y sumar sin
 redondear produce diferencias de céntimos que el usuario ve y no perdona.
@@ -119,6 +131,17 @@ Reglas que **no se pueden romper**:
    genera movimiento propio (ese dinero ya se contó al cerrar la factura). Tampoco se reparte sobre
    las cuotas: el plan financia el saldo que quedó **después** del adelanto.
 
+### El método del abono decide la columna de la venta
+
+Al registrar un abono, el backend actualiza la venta (`syncMirror`) sumándolo a una columna
+según `Method`: `Efectivo → Money`, `Deposito → MoneyDeposit`, `Intercambio → trade`, y
+**cualquier otro → `MoneyCredit` (tarjeta)**. `Transferencia` es un método válido del ENUM, pero
+caería en la columna de tarjeta. **Invoicer manda las transferencias como `Deposito`**
+(`PaymentMethod.Transfer`).
+
+El abono no puede pasar del saldo (el servidor lo rechaza) y lo registra el servidor con su
+movimiento de cuenta si se da `IdCuenta`. Hoy **necesita red**: no hay cola de abonos.
+
 ### Plan de cuotas
 
 Cantidad · frecuencia (`Semanal` / `Quincenal` / `Mensual`) · interés · mora.
@@ -171,17 +194,29 @@ Cantidad · frecuencia (`Semanal` / `Quincenal` / `Mensual`) · interés · mora
   quemado: por eso el NCF se pide **lo más tarde posible**, justo antes de crear la cabecera.
 - El título del documento se deriva del NCF (`utils/receipt.js:98`).
 
-⚠️ **Trampa heredada del POS: la venta a crédito fuerza el NCF.** En `completeOrder.vue:748` la
-condición es `if (withNCF.value || useCartStore().credit)`, pero `TypeNCF` sigue valiendo `""` si
-el usuario nunca abrió el selector fiscal — y entonces se llama a `nfc/verify` con `tipoNCF: ""`.
-En Invoicer, **si la factura queda a crédito y no hay tipo elegido, pregunta el tipo antes de
-guardar**; no heredes la llamada con el tipo vacío.
+⚠️ **Trampa del POS (corregida 2026-09-16): lo que fuerza el NCF es pagar con TARJETA, no la
+venta a crédito.** En `completeOrder.vue:748` la condición es
+`if (withNCF.value || useCartStore().credit)`, y `cartStore.credit` es el importe cobrado con
+**tarjeta** (`MoneyCredit`). Con `TypeNCF` vacío acaba llamando a `nfc/verify` con
+`tipoNCF: ""`. **Invoicer no replica esa regla**: el NCF solo se pide cuando el usuario lo
+activa, siempre con un tipo (B02 por defecto), y B01 exige RNC.
 
 **Secuencia interna** (distinta del NCF, y siempre presente):
 `post('invoiceSecuency', {}, 'next/{IdMarket}')` → `{ Sequence }`. Es el número de factura que ve
 el usuario.
 
 ## 6. Métodos de cobro
+
+Cómo lo guarda Invoicer (`InvoiceDraft`, `InvoiceSender`):
+
+- **Estatus:** con saldo → `Pagos Pendientes`; sin saldo → `Complete`. El POS, en su modo
+  normal, **bloquea** guardar con saldo y exige elegir "Adelanto" o "Cuotas"; aquí el saldo es
+  la señal (guía 07: "si faltante > 0, nace Pagos Pendientes").
+- **`Change`** = devuelta, **nunca negativa** y **solo sale del efectivo**. El POS manda
+  `Money − Total` aunque sea negativo; el cierre de caja suma `Change` en las ventas pagadas
+  (`services/ventas.js`). Cobrar de más por transferencia o tarjeta no se deja guardar.
+- **Movimiento de cuenta** = lo que de verdad entró: `cobrado − devuelta`. El POS suma el cobro
+  bruto (devuelta incluida) y cuenta de más.
 
 `cash` (efectivo) · `deposit` (transferencia/depósito) · `credit` (tarjeta) — y en el POS también
 `trade` (intercambio) y `financing`, **que Invoicer no usa**.
@@ -269,18 +304,18 @@ se dice en la calle: *"el dólar está a 60"*.
 | **Se imprime** | `USD 25.00` |
 | **Se manda a la API** | `1500` |
 
-```ts
-// lib/money.ts — las dos únicas conversiones de la app
-export const aMonedaFactura = (base: number, tasa: number) => round2(base / tasa);
-export const aMonedaBase    = (v: number,    tasa: number) => round2(v * tasa);
+```kotlin
+// core/billing/Money.kt — las dos únicas conversiones de la app
+fun toInvoiceCurrency(base: Double, rate: Double): Double = round2(base / rate)
+fun toBaseCurrency(value: Double, rate: Double): Double = round2(value * rate)
 ```
 
 **Con `DOP` la tasa vale `1` y el campo no se muestra.** Un input que siempre vale uno es ruido.
 
 ⚠️ **La dirección es el bug clásico de esto.** Multiplicar donde tocaba dividir convierte 1,500
 pesos en 90,000 dólares y **no falla nada**: sale un número, grande y creíble. Por eso las dos
-funciones viven **solo** en `lib/money.ts`, con un test por dirección, y ninguna pantalla hace la
-cuenta a mano. Es la misma clase de trampa que el `Number()` de la tasa de impuesto (§1).
+funciones viven **solo** en `core/billing/Money.kt`, con un test por dirección, y ninguna pantalla hace la
+cuenta a mano. Es la misma clase de trampa que la tasa de impuesto como string (§1).
 
 ### Qué se imprime en el PDF
 
@@ -299,7 +334,7 @@ seguirá enseñando `$ 1,500.00`.
 
 - **La moneda no viaja al POS.** No hay dónde guardarla: el POS mostrará `$ 1,500.00` para una
   factura emitida en euros. Correcta en importe, engañosa en símbolo.
-- **La tasa tampoco se guarda en el servidor.** Vive en el teléfono (`AsyncStorage`, asociada al
+- **La tasa tampoco se guarda en el servidor.** Vive en el teléfono (Room, asociada al
   `id` de la venta) y **se pierde al reinstalar**. Reimprimir esa factura desde otro teléfono la
   sacará en moneda base.
 - Las dos se resuelven con la **petición 6** al backend →
@@ -312,4 +347,14 @@ Un documento con NCF es fiscal. **Si hay NCF y la moneda no es `DOP`, avisa ante
 equivalente en pesos va impreso siempre, pero si el contable exige el comprobante en moneda
 nacional, esa factura se emite en `DOP`. Eso no lo decide esta app: lo decide la DGII y el
 contable del negocio.
+
+## Dónde pagar (2026-09-27)
+
+1. Solo en lo que se paga después: cotización o factura con saldo. Una factura cobrada completa
+   no manda cuentas ni nota (y el PDF no las pintaría).
+2. Solo cuentas que pueden recibir una transferencia: activas, que no son `Caja` y con número.
+3. El titular y su **cédula/RNC** van en la cuenta, no en la factura: se escriben una vez.
+4. Se guardan **ids** (`Sales.PaymentAccounts`). El servidor filtra por la tienda de la venta: un id
+   ajeno no expone la cuenta de otra tienda.
+5. La nota es texto libre, se recorta a 400 caracteres y el PDF la escapa (Handlebars).
 

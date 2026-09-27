@@ -4,119 +4,94 @@ Todo sale de `C:\repos\PayBille_POS`. Nada se rediseña.
 
 ## Logo
 
-| Archivo en el POS | Tamaño | Uso aquí |
+**Logo de la app (2026-09-27):** el usuario entregó el logo de Invoicer ("PayBille" sobre
+"INVOICER"), en dos tamaños del mismo dibujo:
+
+| Archivo | Tamaño | Uso |
 |---|---|---|
-| `assets/img/LogoNotBG.png` | 88 KB | **El bueno**: sin fondo. Cabecera, splash, PDF |
-| `assets/img/Logo.fw.png` | 77 KB | Con fondo. Solo si hace falta sobre lienzo claro |
-| `assets/img/favicon.fw.png` | 58 KB | Base para el icono de la app |
+| `drawable/invoicer_logo.png` (era `Logo02.png`) | 589×189 | Login (`PbBrand`, 64 dp de alto) |
+| `drawable/invoicer_logo_small.png` (era `Logo01.png`) | 202×61 | `PbLogo` por debajo de 22 dp. Hoy sin uso: la cabecera volvió al isotipo (2026-09-27) |
 
-```bash
-mkdir -p assets/img
-cp C:/repos/PayBille_POS/assets/img/LogoNotBG.png  assets/img/logo.png
-cp C:/repos/PayBille_POS/assets/img/favicon.fw.png assets/img/icono-base.png
-```
+Se renombraron porque Compose Resources pide minúsculas y `_`. El PNG es gris oscuro y marino sobre
+transparente: en tema oscuro `PbLogo` le aplica una matriz de color (inversión + giro de tono de
+180°) que lo aclara sin perder el azul y el rojo. Si llega una versión para fondo oscuro, sustituye
+a la matriz.
 
-**El icono de la app hay que generarlo aparte**: Android e iOS piden PNG cuadrados y opacos
-(1024×1024) con márgenes propios. Un favicon de web escalado se ve mal. Genera el icono desde el
-logo sobre fondo `#101A42` (`ink`) — el marino de la marca — y deja el `adaptive-icon` de Android
-con el logo centrado y sin fondo.
+Del POS (sigue valiendo para el isotipo y el icono de la app):
 
-En `app.json`:
+⚠️ **Corrección (2026-09-16):** la versión anterior de esta guía señalaba
+`assets/img/LogoNotBG.png` como "el bueno". **Ese archivo es el logo viejo de VëntEX POS**, no el
+de PayBille. El login del POS usa `public/Logo_letter_White.fw.png`.
 
-```json
-{
-  "expo": {
-    "name": "Invoicer By PayBille",
-    "slug": "invoicer-by-paybille",
-    "scheme": "invoicer",
-    "icon": "./assets/img/icono.png",
-    "userInterfaceStyle": "automatic",
-    "splash": { "image": "./assets/img/logo.png", "backgroundColor": "#101A42" },
-    "android": {
-      "adaptiveIcon": { "foregroundImage": "./assets/img/icono-adaptativo.png",
-                        "backgroundColor": "#101A42" }
-    }
-  }
-}
-```
+| Archivo en el POS | Tamaño | Qué es | Uso aquí |
+|---|---|---|---|
+| `public/Logo_white.fw.png` | 96×90 | **Isotipo** (la "dp" azul y roja), fondo transparente | `drawable/paybille_isotipo.png`: cabecera de los destinos (32 dp) y base del icono de la app |
+| `public/Logo_letter_White.fw.png` | 430×90 | Isotipo + "PayBille" en azul marino | No: el texto marino no se lee en tema oscuro. `PbBrand` escribe el nombre con la fuente |
+| `public/Logo_letter_Dark.fw.png` | — | Cuadro azul con isotipo + "PayBille" | Referencia |
+| `public/Icon_White.fw.png` | 287×288 | Icono cuadrado azul con "PayBille" | Base del icono de la app (hay que regenerarlo a 1024×1024) |
+| `assets/img/LogoNotBG.png` | — | **VëntEX POS** | ❌ No usar |
 
-`userInterfaceStyle: "automatic"` es obligatorio para que el tema `system` de
-[05](05-diseno-y-tema.md) funcione.
+**El icono de la app está pendiente.** Android e iOS piden un PNG cuadrado y opaco de 1024×1024
+con márgenes propios; escalar el de 287 px se ve mal. Se genera desde el isotipo sobre el azul de
+`Icon_White.fw.png` (toma el valor exacto de ese archivo) y, para Android, un *adaptive icon* con el isotipo centrado.
+La plantilla de Xcode traía el icono de otra app: se quitó y el `AppIcon` quedó vacío a propósito.
 
 ## Tipografía — Google Sans Flex
 
-**Licencia:** SIL Open Font License 1.1. Es la versión que Google publicó abierta, **no** la Google
-Sans propietaria de sus productos. Se puede empaquetar en la app sin problema; incluye el archivo
-`LICENSE` del paquete junto a las fuentes.
+**Licencia:** SIL Open Font License 1.1 (la versión abierta, no la Google Sans propietaria). Se
+puede empaquetar; su `LICENSE` va en `composeResources/files/licenses/google_sans_flex_ofl.txt`.
 
-### El problema, y cómo se resuelve
+El POS usa `.woff2` **variable**; la app usa **cuatro TTF estáticos**, ya generados en
+`composeResources/font/` → [05](05-diseno-y-tema.md).
 
-El POS usa `.woff2` **variable**. React Native:
+### Receta (por si hay que regenerarlos)
 
-- **no carga `woff2`** (necesita `.ttf` / `.otf`),
-- **no controla ejes variables** desde `StyleSheet`.
-
-Hay que producir **cuatro TTF estáticos**: Regular (400), Medium (500), SemiBold (600) y Bold (700).
-
-### Receta
-
-Del paquete npm que el POS ya tiene instalado
-(`node_modules/@fontsource-variable/google-sans-flex/files/`), el archivo con el eje de peso para
-alfabeto latino es `google-sans-flex-latin-wght-normal.woff2` (y su variante `latin-ext`).
+Origen: `PayBille_POS/node_modules/@fontsource-variable/google-sans-flex/files/
+google-sans-flex-latin-wght-normal.woff2` (el subset latino cubre `áéíóúñÑ¿¡`).
 
 ```bash
 pip install fonttools brotli
-
-# 1) woff2 → ttf variable
-fonttools ttLib.woff2 decompress google-sans-flex-latin-wght-normal.woff2
-
-# 2) instanciar cada peso del eje wght
-for w in 400 500 600 700; do
-  fonttools varLib.instancer google-sans-flex-latin-wght-normal.ttf wght=$w \
-    -o GoogleSansFlex-$w.ttf
+python -m fontTools.ttLib.woff2 decompress google-sans-flex-latin-wght-normal.woff2
+for p in "400 regular" "500 medium" "600 semibold" "700 bold"; do
+  set -- $p
+  python -m fontTools.varLib.instancer google-sans-flex-latin-wght-normal.ttf wght=$1     -o google_sans_flex_$2.ttf
 done
 ```
 
-Renombra a `GoogleSansFlex-Regular.ttf`, `-Medium`, `-SemiBold`, `-Bold` y ponlos en
-`assets/fonts/`. Cárgalos con `useFonts` → [05](05-diseno-y-tema.md).
+Los nombres van en minúsculas y con `_`: Compose Resources no acepta guiones ni mayúsculas.
 
-> Si `varLib.instancer` da problemas, la alternativa es descargar las instancias estáticas desde el
-> repositorio de Google Fonts. **Lo que no vale es cargar el woff2 tal cual**: falla en silencio y
-> la app se queda con la fuente del sistema, que es lo que más delata que "esto no es PayBille".
+## Iconos — Material Symbols Rounded (la fuente)
 
-### Comprobación
+Desde el 2026-09-18 los iconos son **la fuente**, no vectores sueltos (decisión del usuario):
+`composeResources/font/material_symbols_rounded.ttf`, sacada del TTF variable de Google
+`MaterialSymbolsRounded[FILL,GRAD,opsz,wght].ttf` (`github.com/google/material-design-icons`,
+carpeta `variablefont`, Apache-2.0, ≈15 MB).
 
-Después de cargarlas, mira un texto en negrita en **Android**. Si se ve engordado y deforme, estás
-usando `fontWeight: '700'` sobre la Regular y el sistema está sintetizando la negrita. La solución
-es `fontFamily: 'GoogleSans-Bold'`. Es exactamente el mismo problema que en el POS se arregló
-declarando `font-weight: 1 1000`.
+Todo lo hace `documentacion/scripts/material_symbols.py`:
 
-## Iconos — Material Symbols Rounded
-
-El POS tiene la fuente **ya subseteada** a ~107 iconos:
-
-```
-assets/fonts/material-symbols-rounded.woff2   (91 KB, generada por scripts/generar-iconos.py)
-scripts/iconos-map.json                       (mapa nombre-legado → nombre Material)
+```bash
+python documentacion/scripts/material_symbols.py "<ruta>/MaterialSymbolsRounded[FILL,GRAD,opsz,wght].ttf"
 ```
 
-**Para el MVP no la uses.** Empieza con `@expo/vector-icons` → `MaterialIcons`: cubre los nombres
-Material sin mantener nada. Se ve *Filled* en vez de *Rounded*, ligeramente más duro que el POS,
-pero es una diferencia que solo nota quien tenga las dos pantallas al lado.
+1. Fija `GRAD 0 · opsz 24 · wght 400` y deja variable **solo `FILL`**, con **todos** los glifos
+   (≈2 MB). Las ligaduras (`rlig`) y el cambio a los glifos `.fill` (`rclt` con *feature
+   variations*) se conservan.
+2. Escribe `documentacion/scripts/material-symbols-rounded.codepoints` (nombre → codepoint),
+   sacado del `cmap` de la propia fuente.
+3. Regenera `PbSymbols.kt` con la lista `NAMES` del script.
 
-Cuando la marca importe, el camino es:
+### Añadir un icono
 
-1. `fonttools ttLib.woff2 decompress material-symbols-rounded.woff2` → TTF.
-2. Generar el mapa de *codepoints* (nombre → carácter) del subset.
-3. `createIconSet(glyphMap, 'MaterialSymbolsRounded', 'material-symbols-rounded.ttf')`.
+- **Sin descargar nada:** busca su nombre en `material-symbols-rounded.codepoints` y añade la línea
+  a `PbSymbols.kt` **y** el nombre a `NAMES` (para que la próxima regeneración no lo pierda). La
+  fuente ya tiene todos los glifos.
+- **Con la fuente completa:** añade el nombre a `NAMES` y corre el script.
+- **Nunca copies un codepoint de memoria**: varios codepoints apuntan al mismo glifo y otros han
+  cambiado entre versiones. Algunos nombres también: `phone` es `call` y `location_on` es
+  `pin_drop` en esta versión (el script avisa si un nombre no existe).
 
-Y si añades un icono que no está en el subset, hay que **regenerarlo** (`scripts/iconos-map.json` +
-`scripts/generar-iconos.py` en el POS). La señal de que se te olvidó: el icono se pinta como texto
-crudo.
-
-**Material no tiene iconos de marca**: no hay logo de WhatsApp. El POS mapea `i-whatsapp → chat`.
-Aquí, para compartir, usa el icono `share` del sistema y deja que el diálogo nativo muestre la
-marca.
+**Material no tiene iconos de marca**: no hay logo de WhatsApp. Para compartir, usa `share` y deja
+que el diálogo nativo muestre la marca.
 
 ## Logos de bancos
 
@@ -125,6 +100,12 @@ Santa Cruz, Caribe, Cibao, Vimenca, Azul, CardNet, Qik, Mío). Cópialos **solo 
 de Cuentas muestre el banco de cada cuenta; hasta entonces son 14 imágenes de peso muerto en el
 bundle.
 
+⚠️ **Compose Resources no admite subcarpetas en `drawable/`**: `drawable/banks/popular.png` rompe
+`generateResourceAccessorsForCommonMain` ("Acceso denegado" sobre la carpeta en `build/`). Van
+planos y en minúsculas con `_`: `drawable/bank_popular.png`, `bank_promerica.png`… Y si quedó
+una carpeta vieja en `build/generated/compose/resourceGenerator/preparedResources`, hay que
+borrarla (la tarea no limpia lo que ya copió).
+
 ## Paleta y tokens
 
 No hay nada que copiar a mano: los valores están en [05](05-diseno-y-tema.md), ya portados desde
@@ -132,11 +113,11 @@ No hay nada que copiar a mano: los valores están en [05](05-diseno-y-tema.md), 
 
 ## Resumen: qué copiar y cuándo
 
-| Recurso | Cuándo | Origen |
+| Recurso | Estado | Origen |
 |---|---|---|
-| `logo.png` | Fase 0 | `assets/img/LogoNotBG.png` |
-| Icono y splash | Fase 0 | Generado desde el logo sobre `#101A42` |
-| 4 TTF de Google Sans Flex | Fase 0 | Receta de arriba |
-| Iconos Material | Fase 0 (`@expo/vector-icons`) | npm |
-| Fuente Material subseteada | Cuando la marca importe | `assets/fonts/material-symbols-rounded.woff2` |
-| Logos de bancos | Solo con la pantalla de Cuentas | `assets/bancos/` |
+| Isotipo | ✅ (para el icono) | `public/Logo_white.fw.png` |
+| Logo de Invoicer | ✅ | Entregado por el usuario (`Logo01/02.png`) |
+| 4 TTF de Google Sans Flex | ✅ | Receta de arriba |
+| Iconos Material (fuente) | ✅ todos los glifos, eje FILL | `google/material-design-icons` → script |
+| Icono de la app y arranque | Pendiente | Generado desde el isotipo |
+| Logos de bancos | ✅ en uso (`core/ui/BankLogo.kt`, por el texto de `cuentas.BankName`; "Proamérica" → `promerica`): `drawable/bank_apap.jpg`, `bank_azul`, `bank_banreservas`, `bank_bhd`, `bank_cardnet`, `bank_caribe`, `bank_cibao`, `bank_mio`, `bank_popular`, `bank_promerica`, `bank_qik`, `bank_santacruz`, `bank_scotiabank`, `bank_vimenca` → `Res.drawable.bank_*` | `assets/bancos/` |

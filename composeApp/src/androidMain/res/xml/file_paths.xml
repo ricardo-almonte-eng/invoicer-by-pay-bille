@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Debe coincidir con AndroidDocumentPlatform.DIR. -->
+    <files-path name="invoices" path="invoices/" />
+    <!-- Foto de la cámara para un producto o el logo. Debe coincidir con CAPTURE_DIR. -->
+    <cache-path name="captures" path="captures/" />
+</paths>

@@ -11,8 +11,9 @@ son un diseño: es lo que el backend acepta hoy. Cada bloque cita el archivo del
    `isPaid`. **No las "arregles"**: son las columnas.
 
 2. **Los números llegan como string.** `taxValue`, `Amount`, `Price`, `Total`… La API los devuelve
-   a veces como `"0.18"`, `"25.00"`. Envuelve **siempre** en `Number()` antes de operar. En
-   TypeScript, tipa el borde como `string | number` y normaliza en `lib/api`, no en la pantalla.
+   a veces como `"0.18"`, `"25.00"` (los `DECIMAL` de MySQL), y algunos booleanos como `0/1`.
+   Normaliza **en el DTO** con los serializadores `Lenient*` de `core/network`, nunca en la
+   pantalla.
 
 3. **`Sales.Date` NO es una fecha ISO: es un string de presentación** con formato
    `DD/MM/YYYY hh:mm am|pm`, construido a mano en el cliente (`completeOrder.vue`, función
@@ -29,17 +30,39 @@ son un diseño: es lo que el backend acepta hoy. Cada bloque cita el archivo del
 
 ## Sesión
 
-### `users` (JWT decodificado)
+### `users` (respuesta del login = contenido del JWT)
 
 ```ts
-{ id, IdPerson, IdRol, Torning, /* + lo que el backend meta en el token */ }
+{ id, Username, Password, Email, IdPerson, IdRol, Active, Torning, IdMarket, Image, Master,
+  IndRapidLogin, createdAt, updatedAt }
 ```
+
+- ⚠️ **`Password` viaja en claro** en la respuesta del login y dentro del JWT (el backend firma
+  `user.dataValues` entero). `UserDto` no lo declara, así que nunca llega a la base local.
+- `Torning` es `STRING` en la tabla. `IdMarket` es la **tienda activa** y es la que manda: la
+  tienda se lee de aquí, no de `persons.IdMarket`.
+- Respuesta del login con varias tiendas: `{ requiresMarket: true, markets: [{ id, Name,
+  Address, Image, TimeZone }], user: { id, Username } }` → [01](01-arquitectura.md).
 
 ### `persons`
 
 ```ts
 { id, FirstName, LastName, IdMarket, /* … */ }
 ```
+
+### `marketbyuser/mine` y `marketbyuser/switch` — multitienda
+
+```ts
+// mine (controllers/marketByUser.js)
+{ markets: [{ id, Name, Address, Image, TimeZone }], IdMarket, IndRapidLogin }
+// switch
+{ user /* como el del login, con Password: se descarta */, token }
+```
+
+- `markets` usa `MARKET_ATTRS` (`id, Name, Address, Image, TimeZone`), ordenadas por nombre: el
+  mismo `MarketOptionDto` de la primera fase del login.
+- `IdMarket` se relee de la base, no del token. Puede llegar como string (`LenientIntSerializer`).
+- Las dos rutas responden **sin** el sobre `{ data }` (son POST sin `isGet`) → [02](02-api-y-fetch.md).
 
 ### `markets` — la tienda
 
@@ -50,6 +73,11 @@ son un diseño: es lo que el backend acepta hoy. Cada bloque cita el archivo del
 - `taxValue` es **decimal** (`0.18` = 18 %) y **llega como string**.
 - `taxLabel` por defecto `'ITBIS'` (`stores/data/accountDocs.js:22`).
 - `TimeZone` por defecto `'America/Santo_Domingo'`.
+- `Address` es **NOT NULL**; `Mail`, `Phone`, `RNC`, `Image` (URL, `STRING`) admiten nulo.
+  `taxLabel` es ENUM `ITBIS | IVA`; `taxType`, ENUM `included | with_tax | no_tax`.
+- **La factura PDF del servidor** (`services/ventas.js`) pinta de la tienda `Image`, `Name`,
+  `Address`, `RNC`, `Phone` y `Mail`. Es exactamente lo que se edita desde el teléfono (más el
+  impuesto) → `feature/store`. `Settings.LogoInBill` **no** afecta a ese PDF: es de la térmica.
 
 ### `roles`
 
@@ -127,6 +155,39 @@ La tasa se reconstruye con `Tax / SubTotal` cuando hace falta mostrarla.
 | `'Suspendida por Usuario'` / `'Suspendida por sistema'` | Venta en espera del POS | No |
 | `'Esperando Facturacion'` | Flujo PreFacturador → Facturador | No |
 
+#### Cómo se listan (verificado en `repositories/generic.js`)
+
+`get/sales` pasa `params` **tal cual** al `where` de Sequelize y ordena **siempre** por
+`id DESC`:
+
+```json
+{ "params": { "IdMarket": 12, "Gasto": null, "Status": ["Complete", "Pagos Pendientes"] },
+  "isGet": true }
+```
+
+- `"Gasto": null` → `Gasto IS NULL`. La clave **tiene que ir** con `null` explícito.
+- Un arreglo → `IN (…)`.
+- ⚠️ **La API genérica no filtra por la tienda del token.** Si falta `IdMarket` en `params`,
+  devuelve ventas de todas las tiendas.
+- En la lista basta con `id, Secuency, Client, Status, Total, Date, NCF, createdAt`
+  (`SaleDto`). `Total` llega como string. Sin cliente → "Consumidor final".
+
+#### Dónde pagar — `PaymentAccounts` y `PaymentNote` (API `F4`, 2026-09-27)
+
+Columnas nuevas de `Sales` (`sql/F4_instrucciones_pago.sql`, **manual**, antes de desplegar la API):
+
+| Campo | Tipo | Qué es |
+|---|---|---|
+| `PaymentAccounts` | `VARCHAR(255)` | Ids de `Cuentas` separados por coma (`"3,7"`), en el orden elegido |
+| `PaymentNote` | `TEXT` | Instrucciones libres ("Envía el comprobante al…") |
+
+- Invoicer los manda **solo** en cotizaciones y facturas que quedan debiendo
+  (`InvoiceDraft.asksForPayment`); una pagada no los lleva.
+- El PDF (`services/ventas.js → shareFactura`) pinta "Dónde pagar" salvo en `Complete` y
+  `Cancelada`, y **solo** las cuentas activas, con número, que no son `Caja` y que son de la misma
+  tienda que la venta. Se guardan ids, no una copia: si cambia el número, las facturas nuevas salen
+  con el nuevo (el PDF ya generado no cambia, petición 7).
+
 > **Guard obligatorio al listar facturas: `Gasto IS NULL`.** Un gasto es una fila de `sales` con
 > `Gasto = true`, y la columna es *nullable*, así que filtrar por `Gasto = false` **no funciona**.
 > Si se te olvida, los gastos aparecen mezclados entre las facturas.
@@ -188,6 +249,33 @@ Esta es la parte que más sorprende: **el producto y su existencia están separa
 
 Para Invoicer: `IsPart`, `IsWorkshop`, `isCollection` van siempre en `false`; `isSolding: true`.
 
+`IndShowOnCatalog` (`TINYINT`, API `F3`, por defecto `0`): el producto sale en el catálogo público.
+Invoicer lo manda en el alta (interruptor "Mostrar en el catálogo") y en la edición **solo si lo
+conoce**: una ficha guardada antes de existir el campo lo trae vacío y no se toca. Los marcados se
+leen con `generic/get/products` `{ IdMarket, IndShowOnCatalog: true }` y se cambian con
+`PUT generic/products/{id}`.
+
+#### Catálogo público — `POST catalog/token` + `GET catalog/data` (sin sesión)
+
+`catalog/token { storeName }` → `{ token, market }`; el slug es `Name` en minúsculas y sin espacios,
+y solo admite letras (con tilde, `ü`, `ñ`), dígitos, `-` y `_` (`CatalogLink`). `catalog/data`
+(cabecera `Authorization: <token>`) devuelve **un producto por tarjeta** (2026-09-27; antes, una fila
+por `warehouse`):
+
+```ts
+{ products: [{ id, Name, Description, Image, IdCategory, …,
+               Price1,          // el más bajo de sus variantes con precio
+               Amount,          // existencia sumada (sin las infinitas)
+               infinityAmount,  // alguna variante es infinita
+               brand: string | null, colors: string[],   // nombres, ya resueltos
+               variants: [{ warehouseId, Price1, Amount, infinityAmount, brand, color }] }],
+  categories, families, groups }
+```
+
+Marca y color salen de `warehouse` (`IdBrand` → `Brand`, `IdColor` → `Colors`, o el texto `Color`)
+y, si no hay, de `products.Marca`/`Color`. Las unidades únicas vendidas no salen. `variants` es la
+base del carrito futuro → [14](14-carrito-y-pagos-en-linea.md).
+
 ### `warehouse` (`ProductQuickCreate.vue:509`)
 
 ```ts
@@ -219,6 +307,35 @@ Para Invoicer: `IsPart`, `IsWorkshop`, `isCollection` van siempre en `false`; `i
 **Invoicer usa un subconjunto**: `Barcode`, `Price1`, `Cost`, `Amount`, `MinAmountQty`,
 `infinityAmount`, `Size`/`TypeSize`, `unique`. El resto se manda con los valores por defecto de
 arriba para no romper la fila.
+
+### Imagen, categoría, marca y color (verificado 2026-09-27, `ProductQuickCreate.vue`)
+
+| Dato | Tabla y columna | Catálogo |
+|---|---|---|
+| Imagen | `products.Image` (URL de `image/upload`, o una pegada de Google en el POS) | — |
+| Categoría | `products.IdCategory` (**0** = sin categoría, no `null`) | `categories` |
+| Marca | `warehouse.IdBrand` | `brands` |
+| Color | `warehouse.IdColor` **y** `warehouse.Color` (el nombre, texto heredado que el POS sigue leyendo) | `colors` |
+
+Marca y color van en `warehouse` porque en un producto único cada unidad tiene los suyos. Los tres
+catálogos tienen la forma `{ id, Name, Active, IdMarket }`. Batería y Estado (`states`) existen en
+el POS pero son de celulares: no se traen.
+
+### Inventario agrupado — `productinventory/allgrouped` (lo que lista Productos)
+
+`repositories/productInventoryView.js → getWarehouseAllGrouped`: las filas de `warehouse` **agrupadas
+por nombre del producto**: `nombreProducto`, `cantidadAgrupada` (SUM `Amount`, puede ser negativa),
+`minPrice`/`maxPrice` (MIN/MAX `Price1`), `unique` (MAX), `idProduct` (**el menor** de los que
+comparten nombre), `Marca`, `estado` (`Agotado` si la suma es 0). **No trae id de `warehouse`**: la
+ficha lo busca con `getGeneric('warehouse', { idProduct })`.
+
+- Un producto **general** suele tener un `warehouse`; uno **único** (IMEI/serie), uno por unidad.
+  Con más de uno, cada fila tiene su precio y existencia: la app los enseña pero **no los edita**.
+- `products.taxType` (`included` · `with_tax` · `no_tax`) es **por producto**: el impuesto
+  informativo de la ficha lo usa; el alta rápida usa el de la tienda.
+- Alta rápida (`ProductQuickCreate.vue`): `postGeneric('products')` → `postGeneric('warehouse')` (con
+  `idMarket` **en camelCase**: es el atributo del modelo) → `postGeneric('reportInventory')`. La
+  app guarda qué pasos llegaron (`ProductCreateProgress`) para reintentar sin duplicar.
 
 ### `reportInventory` — rastro de cada movimiento
 
@@ -255,7 +372,14 @@ No es opcional: es el historial que el usuario ve cuando no le cuadra el inventa
 }
 ```
 
-En Invoicer el alta pide solo **FirstName, Phone, Identify**; el resto va por defecto.
+En Invoicer el alta (`ClientEditorScreen`, 2026-09-18) pide **Nombre** (obligatorio), Apellido,
+Teléfono, "Tiene WhatsApp", tipo y número de documento y, plegados, Correo, Dirección, Descuento
+y "Paga ITBIS". Los datos financieros del POS (`financialData`, `debt`…) no entran: son de
+financiamientos.
+
+- `Whatsapp` es un **booleano** ("el teléfono es de WhatsApp"), no un número.
+- `PayItbis` es `NOT NULL`: se manda siempre (por defecto `true`). `Discount` es entero (%).
+- El `PUT` genérico no devuelve la fila: la app la arma con lo enviado.
 
 ## Suplidores — `providers`
 
@@ -333,13 +457,23 @@ Con `Method: 'Efectivo'`, el POS solo ofrece cuentas de `Type === 'Caja'`. Repl�
 ### `cuentas`
 
 ```ts
-{ id, Name, Type: 'Efectivo' | 'Banco' | 'Tarjeta' | 'Caja',
-  Description, BankName, AccountNumber, Active, Balance, IdMarket }
+{ id, Name, Type: 'Ahorros' | 'Cheque' | 'Corriente' | 'Nomina' | 'Empresarial' | 'Caja',
+  Description, BankName, AccountNumber, HolderName, HolderId, Active, Balance, IdMarket }
 ```
 
-> El campo `Type` tiene valores documentados como `Efectivo | Banco | Tarjeta`
-> (`endpointGuide/CUENTAS_README.md`) pero el filtro de abonos compara contra `'Caja'`
-> (`AbonoCuentaDoc.vue:104`). **Confírmalo contra datos reales antes de filtrar.**
+`HolderName` y `HolderId` (API `F4`, nullable): titular y su cédula/RNC, lo que pide una
+transferencia desde otro banco. Salen en "Dónde pagar" del PDF. En una `Caja` no se mandan.
+
+> **`Type` confirmado** en el modelo (`domain/models/cuentas.js`) y en `sql/F1_esquema_cuentas.sql`
+> (2026-09-18): el ENUM de arriba. `CUENTAS_API.md` (`Efectivo | Banco | Tarjeta`) está desfasado.
+> ⚠️ `Nomina` va **sin tilde**: el POS ofrece `'Nómina'` en `CreateCuenta.vue` y el ENUM lo rechaza.
+> `Balance` solo se manda al crear (`0`); después lo mueven los movimientos. `BankName` es texto
+> libre con los 14 bancos de `Models/Bancos.js`.
+
+Movimientos (`cuentasMovimientos`): `{ id, IdCuenta, Type: 'Ingreso' | 'Egreso', Amount,
+BalanceBefore, BalanceAfter, Description, Reference, ReferenceType: 'Venta' | 'Compra' | 'Ajuste' |
+'Transferencia' | 'Gasto' | 'CuentaDoc' | 'Cuota' | 'Taller', ReferenceId, IdFinanceCategory,
+Username, createdAt }`. No hay transferencia entre cuentas: "Transferencia" es solo una etiqueta.
 
 ### Movimiento — `POST cuentas/movimientos`
 

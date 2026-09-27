@@ -1,0 +1,22 @@
+# Gradle / Kotlin
+.gradle/
+build/
+.kotlin/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+bin/
+
+# iOS
+iosApp/**/xcuserdata/
+iosApp/build/
+
+# Entorno
+.env
+
+# OS
+.DS_Store
+Thumbs.db

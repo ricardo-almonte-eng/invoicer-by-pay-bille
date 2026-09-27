@@ -24,37 +24,23 @@ aceptarlo, es un cambio del backend, no de este documento.
 
 ## El cliente
 
-`lib/api/client.ts` es el único sitio donde se instancia axios. Réplica de `useFetchStore` con los
-mismos nombres de método, para que cualquier código del POS se traduzca leyéndolo.
+`core/network/PayBilleApi.kt` es el único sitio que habla con el servidor. Réplica de
+`useFetchStore` con los mismos nombres de método, para que cualquier código del POS se traduzca
+leyéndolo. El cliente Ktor (`HttpClientFactory.kt`) añade el token en cada petición:
 
-```ts
-import axios from 'axios';
-import * as SecureStore from 'expo-secure-store';
-
-const api = axios.create({
-  baseURL: process.env.EXPO_PUBLIC_BASE_URL,
-  timeout: 120_000,            // 2 min, igual que el POS
-});
-
-api.interceptors.request.use(async (config) => {
-  const token = await SecureStore.getItemAsync('token');
-  if (token) config.headers.Authorization = token;   // sin "Bearer"
-  return config;
-});
-
-api.interceptors.response.use(
-  (r) => r,
-  (error) => {
-    if (error.code === 'ECONNABORTED') {
-      return Promise.reject(new ApiError('Tiempo de espera agotado. Revisa tu conexión.'));
+```kotlin
+createClientPlugin("PayBilleAuth") {
+    onRequest { request, _ ->
+        val token = tokenProvider.currentToken()          // SessionTokenStore, cacheado
+        if (!token.isNullOrBlank() && !request.headers.contains(HttpHeaders.Authorization)) {
+            request.headers.append(HttpHeaders.Authorization, token)   // sin "Bearer"
+        }
     }
-    if (!error.response) {
-      return Promise.reject(new ApiError('No se pudo conectar al servidor.'));
-    }
-    return Promise.reject(new ApiError(mensajeDe(error.response.data), error.response.status));
-  },
-);
+}
 ```
+
+Tiempos: **2 min por petición** (igual que el POS) pero **15 s para conectar**: sin red el usuario
+debe seguir con lo local, no mirar un indicador dos minutos.
 
 ### Diferencia deliberada con el POS
 
@@ -62,12 +48,37 @@ api.interceptors.response.use(
 además `post()` / `postGeneric()` **capturan la excepción y devuelven un string**, así que allí hay
 que comprobar `req?.status` antes de tocar `req.data`.
 
-Aquí **no**. El interceptor rechaza siempre con un `ApiError` tipado y quien llama decide. React
-Query ya distingue `isError` de `data`, y un toast lanzado desde un interceptor no sabe si la
-pantalla sigue montada.
+Aquí **no**. Todo método devuelve el `data` del sobre o lanza **`ApiException`**, con el mensaje
+ya en español y un `kind`:
+
+| `kind` | Cuándo | Qué hace la pantalla |
+|---|---|---|
+| `Network` | Sin red, DNS, servidor caído | Aviso "sin conexión" y sigue con lo local |
+| `Timeout` | Se agotó el tiempo | Igual que `Network` (`isConnectivity`) |
+| `Server` | 4xx/5xx; mensaje sacado de `data.error` / `data.message` | Aviso de error |
+| `Unexpected` | La respuesta no tiene la forma esperada | Aviso de error |
 
 > Si copias código del POS, este es el punto donde más te vas a equivocar: allí
-> `const req = await post(...)` puede ser un string. Aquí siempre es la respuesta, o un throw.
+> `const req = await post(...)` puede ser un string. Aquí siempre es el `data`, o una excepción.
+
+### El sobre `{ data, meta }`
+
+⚠️ **Corrección (2026-09-27): no toda.** `server.js` solo instala `formatResponseMiddleware`
+(`PayBille_API/src/infrastructure/middlewares/formatters`) en los **GET** y en los **POST con
+`isGet: true`**. Ahí `res.json(x)` sale como `{ data: x, meta: null }` y `{ rows, count }` como
+`{ data: rows, meta: {…} }`. El resto —`PUT` y `POST` genéricos, `marketbyuser/mine` y `switch`,
+`image/upload`— responde **el objeto tal cual**, sin `data`.
+
+`PayBilleApi` devuelve `root["data"] ?: root`, así que cada `RemoteDataSource` recibe lo mismo en
+los dos casos y lo decodifica a su DTO. Las pruebas usan la forma REAL de cada ruta (con o sin
+sobre); no copies un fixture de una ruta a otra sin mirarlo.
+
+### Números como string
+
+Los `DECIMAL` de MySQL llegan como string (`"0.18"`, `"25.00"`) y algunos booleanos como `0/1`.
+Se normalizan **en el DTO** con `LenientDoubleSerializer`, `LenientIntSerializer`,
+`LenientStringSerializer` y `LenientBooleanSerializer` (`core/network/LenientSerializers.kt`).
+Un valor ilegible se lee como `null`, nunca como excepción.
 
 ## Métodos
 
@@ -92,12 +103,16 @@ Los `get` / `getGeneric` filtran por la clave **`params`** del body:
 
 ```ts
 await getGeneric('products', { params: { IdMarket, isSolding: true } });
-await getGeneric('clients',  { params: { FirstName: texto } }, true);   // like
 await getGeneric('sales',    { params: { Status: 'Pagos Pendientes' } });
 ```
 
-`like = true` cambia la ruta a `/like/{model}` y hace búsqueda parcial: es lo que alimenta el
-buscador de clientes y el de productos.
+`get/{model}` pasa `params` **tal cual** al `where` de Sequelize (`repositories/generic.js`):
+`null` → `IS NULL`, un arreglo → `IN (…)`. **No filtra por la tienda del token**: `IdMarket` va
+siempre en `params`. El orden es siempre `id DESC`.
+
+⚠️ **`like/{model}` NO busca en `params`** (corregido 2026-09-16; esta guía decía lo contrario).
+Su controlador lee `likeFields` y usa `params` como filtro exacto. Para buscar texto se usa
+`get/{model}` con la búsqueda OR de abajo, que además pagina bien.
 
 #### Operadores de comparación
 
@@ -141,16 +156,23 @@ Con `meta = true` la respuesta es el sobre completo:
                      hasNextPage, hasPreviousPage, nextPageUrl } }
 ```
 
-`hasNextPage` es lo que alimenta el `onEndReached` de las `FlatList`. Con React Query:
-`useInfiniteQuery` + `getNextPageParam: (last) => last.meta.hasNextPage ? last.meta.currentPage + 1 : undefined`.
+`hasNextPage` es lo que decide si la lista pide la página siguiente al llegar al final. En offline
+first las páginas se guardan en Room y la lista lee de Room: la red solo rellena.
 
 ## Endpoints que usa esta app
 
 | Recurso | Llamada |
 |---|---|
-| Login | `get('users', { key, username, password }, 'login')` → `{ token }` |
+| Login | `get('users', { key, username, password, IdMarket? }, 'login')` → `{ user, token }` · `{ requiresMarket, markets }` · `"Incorrect username or password"` → [01](01-arquitectura.md#arranque-y-sesión-offline-first) |
+| Subir una imagen | `POST image/upload`, **multipart** con el campo `image` (multer: 5 MB, jpeg/png/gif/webp/avif, la extensión sale del nombre del archivo) → `{ message, url }` sin sobre. **Se sube antes del registro que la usa** y la URL se guarda en `products.Image` / `markets.Image` (`STRING`). La ruta pone `auth` DESPUÉS de multer (`routes/images.js`) |
+| Categorías, marcas, colores | `getGeneric('categories' \| 'brands' \| 'colors', { params: { Active: true } }, …, 1, 500)` (el servidor añade `IdMarket`) · alta: `postGeneric(model, { Name, Active: true, IdMarket })` (`commonData.js`, `CreateCatalogItem.vue`) |
+| Configuración de la tienda | `getById('markets', id)` · `put('markets', { Name, Address, Phone, Mail, RNC, Image, taxValue, taxLabel, taxType }, id)`: el genérico hace `instance.update(data)`, así que **lo que no viaja no se toca** |
+| Tiendas del usuario | `post('marketbyuser', {}, 'mine')` → `{ markets, IdMarket, IndRapidLogin }` **sin sobre**; solo las que tiene **activas** (Master: todas; usuario sin filas en `MarketByUser`: la suya) |
+| Cambiar de tienda | `post('marketbyuser', { IdMarket }, 'switch')` → `{ user, token }` sin sobre, con **token nuevo** (el `IdMarket` va dentro). 403 `"No tienes acceso a esta tienda"`. **Sin `RapidLogin`**; sí escribe `Users.IdMarket` y `Persons.IdMarket` (`repositories/marketByUser.js → setActiveMarket`) |
 | Usuario / Persona / Rol / Tienda | `getById('users' \| 'persons' \| 'roles' \| 'markets', id)` |
 | Ajustes de tienda | `getGeneric('Settings', { params: { IdMarket } })` |
+| Productos para vender | `get('productinventory', { IdMarket, barcode \| name }, 'sales', page, pageSize)` → filas de `warehouse` con `product: { id, name, image }` (nombre en **minúscula**). Primero por código; si no hay nada, por nombre (**prefijo**: `name LIKE 'texto%'`). Excluye vendidos, no vendibles y piezas de taller (`productInventoryView.js → getToSale`) |
+| Clientes (buscar) | `getGeneric('clients', { params: { IdMarket }, likeOrParams: ['FirstName','LastName','Phone','Identify'], likeOrValue })` |
 | Productos | `getGeneric('products', …)` · `postGeneric('products', …)` |
 | Existencias | `getGeneric('warehouse', …)` · `postGeneric('warehouse', …)` · `put('warehouse', …, id)` |
 | Movimientos de inventario | `postGeneric('reportInventory', …)` |
@@ -159,11 +181,28 @@ Con `meta = true` la respuesta es el sobre completo:
 | Facturas | `postGeneric('sales', …)` · `put('sales', …, id)` · `getGeneric('sales', …)` |
 | Líneas de factura | `postGeneric('salesProducts', …)` · `getGeneric('salesProducts', { params: { IdSale } })` |
 | Secuencia de factura | `post('invoiceSecuency', {}, 'next/{IdMarket}')` → `{ Sequence }` |
-| NCF · comprobar rango | `post('nfc', { IdMarket, tipoNCF }, 'verify')` → `{ newNFC }` |
-| NCF · consumir | `post('nfc', { IdMarket, tipoNCF }, 'getNextNFC')` → `{ newNFC }` |
-| Cuentas de dinero | `getGeneric('cuentas', { params: { IdMarket, Active: true } })` |
+| NCF · comprobar rango | `post('nfc', { IdMarket, tipoNCF }, 'verify')` → `{ newNFC: true }` o `{ newNFC: "No hay rangos…" }` |
+| NCF · consumir | `post('nfc', { IdMarket, tipoNCF }, 'getNextNFC')` → `{ newNFC: "B02…" }`. ⚠️ Los errores llegan **dentro de `newNFC`** o como **texto plano con HTTP 200** (`res.send`, fuera del sobre): valida que sea el tipo seguido de dígitos. Su aviso de "rango agotado" nunca salta (compara con `rango.Final`, que no existe) |
+| Cuentas de dinero (para cobrar) | `getGeneric('cuentas', { params: { IdMarket, Active: true } })`. (El POS usa `post('cuentas', …, 'get')` y lee `res.data.rows`, que tras el sobre no existe) |
+| **PDF "factura grande"** | `GET ventas/factura/{id}` → **el archivo PDF** (A4, lo genera el servidor con su plantilla). `POST ventas/factura/generate/{id}` solo devuelve `{ fileName, fileUrl }`. ⚠️ El servidor **guarda** el PDF la primera vez y después lo devuelve sin regenerar (`pdf.js → savePDF`), y la ruta `GET` **no pide token** → peticiones 7 y 8 ([11](11-plan-de-implementacion.md)) |
+| Detalle de venta | `getGeneric('sales', { params: { id, IdMarket } })` + `getGeneric('salesProducts', { params: { IdSale } })` |
+| Cuentas por cobrar | `post('accountdocs', { Kind: 'Cobrar', OnlyWithBalance: true }, 'get')` paginado (filtra por la tienda del token, ordena por vencimiento) |
+| Documento de una venta | `post('accountdocs', { IdSale }, 'from-sale')` → `{ Document, Items, Installments, Payments }`. Idempotente: devuelve el que ya existe. **Solo para ventas con saldo** |
+| Abono | `post('accountdocs', { Amount, LateFeeAmount: 0, Method, PaymentDate, IdCuenta, Reference }, '{id}/payments')`. `Method: 'Deposito'` para transferencias → [08](08-reglas-de-negocio.md) §3 |
 | Movimiento de cuenta | `post('cuentas', { … }, 'movimientos')` |
 | Órdenes de compra | `postGeneric('shoppings', …)` · `postGeneric('shoppingProducts', …)` |
+| **Resumen** (dashboard) | `get('dashboard', { startDate, endDate, params: { IdMarket } }, 'summary')` → `{ today, range, series, topProducts, activeTornings }`. El controlador saca la tienda de `params` |
+| Inventario agrupado | `getPage('productinventory', { is: true, IdMarket, params: [{ key: 'IdMarket', value }] }, 'allgrouped', page, pageSize)` → `{ idProduct, nombreProducto, cantidadAgrupada, minPrice, maxPrice, unique, Marca }` agrupado **por nombre**. `params` como arreglo: el servidor lo reparte por prefijo `Product.` / `Warehouse.` |
+| Resumen del inventario | `get('productinventory', { IdMarket }, 'info')` — lee `IdMarket` del **cuerpo**, no de `params` |
+| Ficha de producto | `getById('products', id)` + `getGeneric('warehouse', { idProduct, IdMarket })` + `getGeneric('reportInventory', { IdProduct, IdMarket })` |
+| Saldos por cliente | `getPage('accountdocs', { Kind: 'Cobrar', OnlyWithBalance: true }, 'byparty', page, pageSize)` → `{ PartyKey (= IdClient, 0 si nombre libre), PartyName, Docs, Total, Paid, Balance, OldestDueDate, DaysOverdue }` |
+| Lo que debe un cliente | `getPage('accountdocs', { Kind: 'Cobrar', IdClient, OnlyWithBalance: true }, 'get', 1, 50)` |
+| Facturas de un cliente | `getGeneric('sales', { IdMarket, IdClient, Gasto: null, Status: [...] })` |
+| Cuentas (todas) | `getGeneric('cuentas', { IdMarket })` · `postGeneric('cuentas', …)` · `put('cuentas', …, id)` |
+| **Movimientos de una cuenta** | `getPage('cuentas', { params: { createdAt__gte: 'YYYY-MM-DD 00:00:00', createdAt__lte: '… 23:59:59' } }, '{id}/movimientos', page, pageSize)`. ⚠️ El controlador solo lee `params` del cuerpo y la página de la **query**: el POS manda `dateFrom`/`page` en el cuerpo, se ignoran y **siempre enseña los 10 más recientes** |
+| Ventas por fecha | `get('report', { startDate, endDate, params: [{ key: 'IdMarket', value }] }, 'totals/no')` + `getPage('report', { …, params: [IdMarket, { key: 'Gasto', value: null }] }, 'no', …)`. ⚠️ **`params` tiene que ser arreglo**: `repositories/sales.js` lo recorre con `for…of` y un objeto hace fallar al servidor. Sin datos responden `{ message: "No se encontraron datos" }` |
+| Productos vendidos | `get('productinventory', { startDate, endDate, params: [IdMarket] }, 'report/totalProductCost')` + `getPage(…, 'report/salesProductsGrouped', …)` (sin paginar en el servidor; agrupa también por estatus y precio: la app suma por producto) |
+| Histórico del inventario | `getPage('productinventory', { startDate, endDate, params: [IdMarket] }, 'report/history', 1, 200)` |
 
 ### Libro de cuentas (`accountdocs`) — el corazón de los pagos parciales
 
@@ -197,8 +236,8 @@ En el POS (`pages/ventas.vue:1040`) la venta **nace vacía en el servidor** con
 `Status: 'En Proceso'`, cada producto escaneado hace un `POST salesProducts`, y al cobrar se hace
 `PUT sales/{id}`. Tiene sentido en un mostrador con red por cable.
 
-**En móvil eso es un error.** El borrador vive **en el teléfono** (Zustand + AsyncStorage) y solo al
-pulsar *Guardar* se ejecuta la secuencia:
+**En móvil eso es un error.** El borrador vive **en el teléfono** (Room) y solo al pulsar
+*Guardar* se ejecuta la secuencia:
 
 ```
 1. post('invoiceSecuency', {}, `next/${IdMarket}`)             → Sequence
@@ -228,12 +267,14 @@ líneas. Mientras el backend no ofrezca algo mejor:
 
 ## Patrón estándar en una pantalla
 
-```ts
-const { data, isLoading, refetch } = useQuery({
-  queryKey: ['facturas', filtros],
-  queryFn: () => salesApi.list(filtros, page),
-});
+```
+Screen ──collect── ScreenModel ──── Repository ──┬── Room (Flow)   ← la pantalla SIEMPRE lee de aquí
+                                                  └── RemoteDataSource → PayBilleApi   ← solo refresca
 ```
 
-Sin *loading* global tapando la pantalla: en móvil el indicador vive **dentro** de la lista (skeleton
-o `RefreshControl`) o **dentro** del botón que disparó la acción.
+La pantalla observa un `Flow` de Room y pinta lo que haya. El `ScreenModel` pide un refresco;
+si hay red, el repositorio escribe en Room y la pantalla se actualiza sola. Si no hay red, se
+enseña el aviso de "sin conexión" y todo lo demás sigue funcionando.
+
+Sin *loading* global tapando la pantalla: en móvil el indicador vive **dentro** de la lista o
+**dentro** del botón que disparó la acción.

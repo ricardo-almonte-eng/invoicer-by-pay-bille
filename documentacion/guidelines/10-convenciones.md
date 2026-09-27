@@ -2,34 +2,42 @@
 
 ## Obligatorio
 
-1. **HTTP solo por `lib/api`.** Ninguna pantalla importa `axios`. Ni una.
-2. **El impuesto se calcula solo en `lib/tax.ts`.** Si ves aritmética de impuesto en un componente,
-   es un bug esperando a divergir del backend.
-3. **`Number()` en todo lo que venga de la API.** `taxValue`, `Amount`, `Price`, `Total` llegan como
-   string. Normaliza en `lib/api`, no en la pantalla.
-4. **Cero colores literales.** Todo por `useTheme()` → [05](05-diseno-y-tema.md).
-5. **Cero sombras** (`elevation`, `shadowOpacity`). Se separa con `borderWidth: 1`.
-6. **`fontFamily` por peso**, nunca `fontWeight` → [05](05-diseno-y-tema.md).
-7. **Todo importe con `fontVariant: ['tabular-nums']`.**
-8. **Nada pulsable por debajo de 44 pt** (usa `hitSlop` si el dibujo es menor).
-9. **Nunca envíes `Paid` ni `Balance`** a `accountdocs`: los rechaza el servidor.
-10. **`Gasto IS NULL`** en toda consulta sobre `sales`.
-11. **UI en español**, `es-DO`, `America/Santo_Domingo`.
+1. **Todo en `commonMain`.** A `androidMain`/`iosMain` solo baja lo que exige la plataforma, y
+   siempre con `expect`/`actual` → [01](01-arquitectura.md).
+2. **HTTP solo por `core/network`.** Ninguna pantalla ni `ScreenModel` importa Ktor.
+3. **La pantalla lee de Room**, nunca de la red → [04](04-estado-y-stores.md).
+4. **El impuesto se calcula solo en `core/billing/Tax.kt`** y la moneda solo en
+   `core/billing/Money.kt`. Aritmética de impuesto en un componente es un bug esperando a
+   divergir del backend.
+5. **Números de la API, normalizados en el DTO** con los serializadores `Lenient*`. Nunca
+   `toDouble()` en una pantalla.
+6. **Cero colores literales** fuera de `Colors.kt`. Todo por `PbTheme.colors`.
+7. **Cero sombras ni elevación.** Se separa con borde de 1 dp.
+8. **Sin Material.** Componentes `Pb*` propios → [06](06-componentes-ui.md).
+9. **Texto con `PbTheme.typography`**; todo importe con `amount` (cifras tabulares).
+10. **Nada pulsable por debajo de 44 dp.**
+11. **Nunca envíes `Paid` ni `Balance`** a `accountdocs`: los rechaza el servidor.
+12. **`Gasto IS NULL`** en toda consulta sobre `sales`.
+13. **UI en español**, `es-DO`, `America/Santo_Domingo`.
+14. **Base local con migraciones**: se sube `version`, nunca se destruye → [01](01-arquitectura.md).
 
 ## Nombres
 
 | Cosa | Convención | Ejemplo |
 |---|---|---|
-| Componente | PascalCase, archivo igual que el componente | `LineaFactura.tsx` |
-| Hook | `useAlgo` | `useFacturas` |
-| Store Zustand | `useAlgo` en `stores/algo.ts` | `useDraftInvoice` |
-| Ruta expo-router | kebab o minúscula | `app/factura/nueva.tsx` |
-| Tipo de la API | PascalCase, **igual que la tabla** | `Sale`, `SalesProduct`, `Warehouse` |
-| Función | camelCase, verbo primero | `calcularTotales()` |
+| Componente propio | `Pb` + PascalCase, un archivo por componente | `PbButton.kt` |
+| Pantalla | `…Screen` (`Screen` de Voyager) | `LoginScreen` |
+| Estado de pantalla | `…ScreenModel` + `…UiState` | `LoginScreenModel`, `LoginUiState` |
+| Repositorio | `…Repository` (`single` en Koin) | `SessionRepository` |
+| Llamadas a la API | `…RemoteDataSource` | `AuthRemoteDataSource` |
+| DTO de la API | `…Dto`, campos con `@SerialName` **igual que la tabla** | `MarketDto` |
+| Tabla Room | `…Entity` + `…Dao` | `SessionEntity` |
+| Paquete | `com.paybille.invoicer.feature.<feature>.{data,domain,presentation}` | |
+| Función | camelCase, verbo primero | `refreshProfile()` |
 
-**Los campos de la API se escriben exactamente como los devuelve el backend**, incluidas sus
-rarezas (`idWarehouse`, `taxType`, `unique`, `sold`). Renombrarlos a un estilo bonito obliga a
-mantener un mapeo en los dos sentidos y a recordarlo para siempre.
+**Los campos de la API se escriben exactamente como los devuelve el backend** dentro de
+`@SerialName` (`"IdMarket"`, `"taxValue"`, `"Torning"`). La propiedad Kotlin va en camelCase; el
+mapeo vive en el DTO y en ningún otro sitio.
 
 ## Idioma del código
 
@@ -38,19 +46,23 @@ mantener un mapeo en los dos sentidos y a recordarlo para siempre.
 - Los campos de la API son lo que son, y muchos ya vienen en español (`Cotizacion`, `Torning`,
   `Gasto`, `cuentas`, `movimientos`). No los traduzcas.
 
-## TypeScript
+## Kotlin
 
-- `strict: true`.
-- Los tipos de la API viven en `types/api.ts` y son **espejo de** [03](03-modelo-de-datos.md).
-- Donde el backend sea irregular, dilo en el tipo: `Amount: string | number`, y normaliza al
-  entrar. No mientas con `number` a secas.
-- **Sin `any`.** Si algo es desconocido, es `unknown` y se valida.
+- DTO y dominio son `data class` inmutables. El dominio **no** lleva anotaciones de
+  serialización ni de Room.
+- Donde el backend sea irregular, dilo en el DTO (`@Serializable(LenientDoubleSerializer::class)`)
+  y normaliza al entrar. No mientas con un `Double` a secas sin serializador.
+- `CancellationException` **siempre se relanza**: capturar `Exception` sin hacerlo rompe la
+  cancelación de corrutinas.
+- Nada de `!!` en código de producción; en pruebas se permite.
+- Las pruebas de `commonTest` usan `MockEngine` con respuestas **copiadas de la API real**, y se
+  nombran en español describiendo el caso (`credencialesMalasLleganComoStringConHttp200`).
 
 ## Comentarios
 
 Se comenta **por qué**, no **qué**. El estilo de la casa está en el POS y es bueno; imítalo:
 
-```ts
+```kotlin
 // El NCF se pide lo más tarde posible: un número consumido no se devuelve,
 // así que si la creación de la cabecera falla, ese comprobante queda quemado.
 ```
