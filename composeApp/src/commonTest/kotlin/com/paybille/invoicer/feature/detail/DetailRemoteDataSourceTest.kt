@@ -1,7 +1,6 @@
 package com.paybille.invoicer.feature.detail
 
 import com.paybille.invoicer.core.network.ApiConfig
-import com.paybille.invoicer.core.network.ApiException
 import com.paybille.invoicer.core.network.PayBilleApi
 import com.paybille.invoicer.core.network.createHttpClient
 import com.paybille.invoicer.feature.detail.data.remote.DetailRemoteDataSource
@@ -24,9 +23,7 @@ import kotlinx.serialization.json.double
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
-import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class DetailRemoteDataSourceTest {
@@ -43,28 +40,6 @@ class DetailRemoteDataSourceTest {
 
     private fun MockRequestHandleScope.json(body: String, status: HttpStatusCode = HttpStatusCode.OK) =
         respond(body, status, headersOf(HttpHeaders.ContentType, "application/json"))
-
-    @Test
-    fun laFacturaGrandeLlegaComoArchivo() = runTest {
-        val pdf = "%PDF-1.4 prueba".encodeToByteArray()
-        val remote = source { respond(pdf, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/pdf")) }
-
-        val bytes = remote.invoicePdf(100)
-
-        assertContentEquals(pdf, bytes)
-        val request = requests.single()
-        assertEquals(HttpMethod.Get, request.method)
-        assertEquals("/ventex/api/ventas/factura/100", request.url.encodedPath)
-    }
-
-    @Test
-    fun siLaFacturaNoExisteEsErrorDelServidor() = runTest {
-        val remote = source { json("""{"data":{"message":"Factura no encontrada"}}""", HttpStatusCode.NotFound) }
-
-        val error = assertFailsWith<ApiException> { remote.invoicePdf(9) }
-        assertEquals("Factura no encontrada", error.message)
-        assertEquals(404, error.status)
-    }
 
     @Test
     fun elDocumentoDeUnaVentaSeBuscaConFromSaleYTraeAbonos() = runTest {

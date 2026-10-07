@@ -84,7 +84,7 @@ fecha, y el `PbTag` de estatus. Todo lo demás está en el detalle.
 | `PanelCobro` | Efectivo / transferencia / tarjeta + cuenta destino + faltante |
 | ✅ `SaleStatus.label()` | Texto y tono del estatus: Pagada (`Success`), Pendiente (`Warning`, naranja), Cotización (`Neutral`), Anulada (`Danger`); otro valor, tal cual en `Neutral` |
 | `ListaAbonos` | Historial de pagos de un documento con su saldo |
-| `VistaDocumento` | La factura "en papel" que se convierte en PDF para compartir |
+| `VistaDocumento` | La factura "en papel" → hoy es `HtmlView` + la plantilla (ver abajo) |
 
 ## Reglas de componente
 
@@ -99,25 +99,49 @@ fecha, y el `PbTag` de estatus. Todo lo demás está en el detalle.
    títulos con `semantics { heading() }`; errores de campo con `semantics { error(...) }`.
 7. **Pensado para 360 dp y letra grande:** dos botones con texto no van lado a lado; se apilan.
 
-## El PDF de la factura
+## La factura: HTML generado en el teléfono (2026-10-06)
 
-El POS imprime en térmica (ESC/POS + `print-agent`). **Aquí el "imprimir" es compartir**, y el
-PDF **no se genera en el teléfono**: es la "factura grande" del servidor.
+El POS imprime en térmica (ESC/POS + `print-agent`). **Aquí el "imprimir" es compartir**, y la
+factura **la genera el teléfono**. Antes era el PDF que armaba el servidor con Puppeteer
+(`GET ventas/factura/{id}`): tardaba, fallaba al mostrarse y, como `savePDF` lo guardaba por
+nombre, tras un abono seguía con el saldo viejo. Ahora el servidor solo da **datos**.
 
 ```
-GET ventas/factura/{id} → carpeta privada (InvoicePdfStore)
-   → vista previa (DocumentPlatform.renderPdf: PdfRenderer / PDFKit)
-   → compartir (share: FileProvider / UIActivityViewController)
-   → descargar (saveCopy: MediaStore Descargas / selector de Archivos)
+GET ventas/factura/{id}/data ──► cached_payloads "invoice-doc:{id}"   (offline first)
+GET invoiceConfig/{IdMarket}  ──► cached_payloads "invoice-config"     (viene también dentro de /data)
+logo de la tienda (bytes)     ──► cached_payloads "invoice-logo"       ({ url, dataUri })
+                     │
+   InvoiceHtml.render(plantilla, datos, config, assets)   ← puro, con pruebas
+                     │
+   HtmlView (expect/actual: WebView · WKWebView)  → vista previa y visor completo
+   DocumentPlatform.htmlToPdf → InvoicePdfStore   → compartir / descargar
 ```
 
-Notas del POS que aquí siguen valiendo:
+- **Plantilla:** `composeResources/files/invoice_template.html` (diseño del ejemplo de Bookipi con
+  la identidad de PayBille). La rellena `MiniTemplate`, un Mustache mínimo: `{{campo}}` escapado,
+  `{{{campo}}}` sin escapar, `{{#lista}}…{{/lista}}`, `{{^campo}}…{{/campo}}`. Si la tienda guardó
+  su propia plantilla (`invoiceconfig.TemplateHtml`, texto), se usa esa.
+- **Todo embebido en `data:`**: la tipografía Google Sans Flex (`@font-face`), el isotipo del pie
+  y el logo de la tienda. La factura se ve y se convierte en PDF **sin red**. El logo se pide
+  primero por `https://` (hay logos guardados como `http://`, que Android no deja cargar).
+- **Es papel:** fondo blanco y tinta oscura también en tema oscuro. Se adapta al ancho: en el
+  teléfono (<560 px) se apila y las columnas Precio/Cant. pasan bajo el nombre.
+- **PDF en Android** (`AndroidHtmlPdf`): WebView fuera de pantalla a 794 px CSS (A4 a 96 dpi),
+  dibujado en `PdfDocument`; corta las páginas por los bordes de `tr` y `.blk` (los mide con JS),
+  nunca a mitad de una línea. Necesita `WebView.enableSlowWholeDocumentDraw()` antes del primer
+  WebView (`WebViews.prepare()`). El texto sale rasterizado (no seleccionable).
+- **PDF en iOS** (`IosHtmlPdf`): `UIPrintPageRenderer` sobre un `WKWebView`. ⚠️ Sin verificar
+  en Xcode.
+- La firma se dibuja con el dedo (`SignaturePad`) y se guarda como **SVG** (`SignatureSvg`): al
+  pintarla se rehace con solo el `viewBox` y los `d` de los trazos (nada de `<script>`).
+- **No reutilices `css/Receipt.css` ni `css/Factura.css`** del POS: están calibrados para papel
+  térmico de 58/80 mm. La factura de esta app es A4 y es un documento distinto.
 
-- El logo lo controla `settings.LogoInBill`.
-- El título del documento sale del NCF: `B03 → NOTA DE DEBITO`, `B04 → NOTA DE CREDITO`
-  (`utils/receipt.js:98`). Reutiliza esa lógica.
-- **No reutilices `css/Receipt.css` ni `css/Factura.css`.** Están calibrados al milímetro para papel
-  térmico de 58/80 mm y `BillSize`. El PDF de esta app es tamaño carta y es un documento distinto.
+| Componente | Dónde | Para qué |
+|---|---|---|
+| `HtmlView(html, interactive)` | `core/platform` (expect/actual) | Visor HTML del sistema. `interactive = false`: sin scroll ni zoom; el toque es del Compose de encima |
+| `SignaturePad` | `feature/document/presentation` | Firmar con el dedo; puntos en el sistema del `viewBox` (600 × 200) |
+| `PbColors.paperInk` · `InvoiceAccentOptions` | `Colors.kt` | Tinta sobre papel (igual en oscuro) y los colores de acento que se pueden elegir |
 
 ## Añadidos 2026-09-27 (4)
 

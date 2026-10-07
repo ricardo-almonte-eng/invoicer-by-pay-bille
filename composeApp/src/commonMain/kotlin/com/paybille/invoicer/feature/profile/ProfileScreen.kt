@@ -46,6 +46,7 @@ import com.paybille.invoicer.core.designsystem.theme.PbTheme
 import com.paybille.invoicer.core.format.formatPercent
 import com.paybille.invoicer.feature.auth.domain.Session
 import com.paybille.invoicer.feature.store.presentation.StoreSettingsScreen
+import com.paybille.invoicer.feature.document.presentation.InvoiceSettingsScreen
 
 /** Mi perfil: quién entró, en qué tienda, sincronización y cerrar sesión. */
 data object ProfileScreen : Screen {
@@ -59,6 +60,7 @@ data object ProfileScreen : Screen {
             onBack = { navigator.pop() },
             onOpenStoreSettings = { navigator.push(StoreSettingsScreen) },
             onOpenCatalog = { navigator.push(CatalogScreen) },
+            onOpenInvoiceDesign = { navigator.push(InvoiceSettingsScreen) },
             onRetry = model::refresh,
             onAskLogout = model::askLogout,
             onCancelLogout = model::cancelLogout,
@@ -73,6 +75,7 @@ private fun ProfileContent(
     onBack: () -> Unit,
     onOpenStoreSettings: () -> Unit,
     onOpenCatalog: () -> Unit,
+    onOpenInvoiceDesign: () -> Unit,
     onRetry: () -> Unit,
     onAskLogout: () -> Unit,
     onCancelLogout: () -> Unit,
@@ -89,7 +92,7 @@ private fun ProfileContent(
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
         )
         Box(Modifier.fillMaxWidth().height(PbControl.border).background(PbTheme.colors.outline))
-        ProfileBody(state, onOpenStoreSettings, onOpenCatalog, onRetry, onAskLogout, onCancelLogout, onConfirmLogout)
+        ProfileBody(state, onOpenStoreSettings, onOpenCatalog, onOpenInvoiceDesign, onRetry, onAskLogout, onCancelLogout, onConfirmLogout)
     }
 }
 
@@ -98,6 +101,7 @@ private fun ProfileBody(
     state: ProfileUiState,
     onOpenStoreSettings: () -> Unit,
     onOpenCatalog: () -> Unit,
+    onOpenInvoiceDesign: () -> Unit,
     onRetry: () -> Unit,
     onAskLogout: () -> Unit,
     onCancelLogout: () -> Unit,
@@ -118,6 +122,7 @@ private fun ProfileBody(
             onRetry = onRetry,
             onOpenSettings = onOpenStoreSettings,
             onOpenCatalog = onOpenCatalog,
+            onOpenInvoiceDesign = onOpenInvoiceDesign,
         )
         LogoutSection(
             confirming = state.confirmingLogout,
@@ -176,6 +181,7 @@ private fun StoreCard(
     onRetry: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenCatalog: () -> Unit,
+    onOpenInvoiceDesign: () -> Unit,
 ) {
     val colors = PbTheme.colors
     val store = session.store
@@ -228,6 +234,13 @@ private fun StoreCard(
             onClick = onOpenSettings,
             variant = PbButtonVariant.Outline,
             leadingIcon = PbSymbols.Settings,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        PbButton(
+            text = "Diseño de factura",
+            onClick = onOpenInvoiceDesign,
+            variant = PbButtonVariant.Outline,
+            leadingIcon = PbSymbols.ReceiptLong,
             modifier = Modifier.fillMaxWidth(),
         )
         PbButton(

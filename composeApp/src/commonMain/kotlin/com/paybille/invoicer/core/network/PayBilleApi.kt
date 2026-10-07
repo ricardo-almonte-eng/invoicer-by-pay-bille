@@ -14,7 +14,6 @@ import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
-import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
@@ -168,31 +167,6 @@ class PayBilleApi(
 
     /** `GET {BASE}/{path}` (endpoints de negocio por GET, p. ej. `accountdocs/{id}`). */
     suspend fun getBusiness(path: String): JsonElement = call { client.get("${config.baseUrl}/$path") }
-
-    /**
-     * `GET {BASE}/{path}` que responde un ARCHIVO (p. ej. el PDF de `ventas/factura/{id}`).
-     * Si el servidor responde JSON de error en vez del archivo, se lanza [ApiException].
-     */
-    suspend fun download(path: String): ByteArray {
-        val response = send { client.get("${config.baseUrl}/$path") }
-        if (!response.status.isSuccess()) {
-            val text = runCatching { response.bodyAsText() }.getOrNull().orEmpty()
-            val parsed = runCatching { PayBilleJson.parseToJsonElement(text) }.getOrNull()
-            val data = (parsed as? JsonObject)?.get("data") ?: parsed
-            throw ApiException(
-                messageOf(data) ?: messageOf(parsed) ?: "No se pudo descargar el documento (${response.status.value}).",
-                ApiException.Kind.Server,
-                response.status.value,
-            )
-        }
-        return try {
-            response.readRawBytes()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            throw ApiException("Se perdió la conexión al descargar el documento.", ApiException.Kind.Network, cause = e)
-        }
-    }
 
     /**
      * `POST {BASE}/image/upload` (multipart, campo `image`) → la URL pública de la imagen, como

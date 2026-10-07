@@ -63,6 +63,8 @@ class IosDocumentPlatform : DocumentPlatform {
             }
         }
 
+    override suspend fun htmlToPdf(html: String, outputPath: String) = IosHtmlPdf.write(html, outputPath)
+
     override fun share(path: String, mimeType: String, title: String) {
         val controller = UIActivityViewController(
             activityItems = listOf(NSURL.fileURLWithPath(path)),

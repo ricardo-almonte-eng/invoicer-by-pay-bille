@@ -171,9 +171,6 @@ class DetailRemoteDataSource(private val api: PayBilleApi) {
         return ReceivablesPage(decode(ListSerializer(AccountDocDto.serializer()), result.items), result.hasNextPage)
     }
 
-    /** El PDF de la "factura grande" (`GET ventas/factura/{id}`). */
-    suspend fun invoicePdf(saleId: Int): ByteArray = api.download("ventas/factura/$saleId")
-
     private fun <T> decode(serializer: KSerializer<T>, data: JsonElement): T = try {
         PayBilleJson.decodeFromJsonElement(serializer, data)
     } catch (e: SerializationException) {

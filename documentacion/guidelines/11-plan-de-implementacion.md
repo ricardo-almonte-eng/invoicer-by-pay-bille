@@ -64,8 +64,10 @@ Adelantado el 2026-09-16, a petición del usuario:
 - [ ] Buscar productos y clientes sin conexión **en los buscadores del editor** (los destinos
       Productos y Clientes ya buscan en Room desde el 2026-09-18; los buscadores aún van a la red).
 - [x] Lista de facturas con filtros por estatus y **`Gasto IS NULL`** (en el Inicio).
-- [x] Detalle de factura con la "factura grande" (PDF del servidor) como protagonista.
-- [x] Compartir y descargar el PDF (hoja del sistema; Descargas / Archivos).
+- [x] Detalle de factura con la factura como protagonista. Desde 2026-10-06 la genera el
+      teléfono (HTML + diseño de la tienda) con `ventas/factura/{id}/data`; ya no es el PDF del servidor.
+- [x] Compartir y descargar el PDF (generado en el teléfono; hoja del sistema; Descargas / Archivos).
+- [x] Diseño de factura por tienda (`invoiceconfig`, API `F5`): secciones, color, textos y firma.
 
 **Se termina cuando:** el usuario factura desde el teléfono y la factura aparece igual en el POS.
 A partir de aquí la app ya sirve para algo, y todo lo demás se puede probar contra uso real.
@@ -155,7 +157,7 @@ notan mucho.
 | 3 | **`GET /sales/{id}/full`** — factura con sus líneas, abonos y saldo en una llamada | Hoy son 3 llamadas para pintar un detalle |
 | 4 | Confirmar los valores reales de **`cuentas.Type`** | La documentación dice `Efectivo\|Banco\|Tarjeta`, el código filtra por `'Caja'` |
 | 5 | Un endpoint de **resumen del día** por `IdMarket` | La pantalla de Inicio hoy tendría que sumar en el cliente |
-| 7 | **Regenerar el PDF cuando cambia la factura** (`pdf.js → savePDF` lo guarda por nombre y lo devuelve siempre) | Tras un abono, el PDF compartido sigue diciendo "Pendiente" y el saldo viejo |
+| 7 | ~~Regenerar el PDF cuando cambia la factura~~ | ✅ Resuelto de otra forma (2026-10-06): la app genera la factura con `ventas/factura/{id}/data`. El PDF del servidor sigue cacheado para el POS |
 | 8 | **`GET ventas/factura/{id}` sin token** | Cualquiera puede descargar cualquier factura probando ids. Debería pedir `auth` o usar el token público del QR |
 | 9 | **`from-sale` no debería crear documento para una venta pagada** (o un `accountdocs/by-sale/{id}` de solo lectura) | Hoy la app evita llamarlo en ventas pagadas para no crear un documento de más |
 | 10 | **`cuentas/{id}/movimientos` debería leer `page`/`pageSize` y fechas del cuerpo** (o el POS mandarlos como la app) | El POS enseña siempre los 10 movimientos más recientes, elija el rango que elija |

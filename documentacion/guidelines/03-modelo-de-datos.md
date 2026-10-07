@@ -75,7 +75,7 @@ son un diseño: es lo que el backend acepta hoy. Cada bloque cita el archivo del
 - `TimeZone` por defecto `'America/Santo_Domingo'`.
 - `Address` es **NOT NULL**; `Mail`, `Phone`, `RNC`, `Image` (URL, `STRING`) admiten nulo.
   `taxLabel` es ENUM `ITBIS | IVA`; `taxType`, ENUM `included | with_tax | no_tax`.
-- **La factura PDF del servidor** (`services/ventas.js`) pinta de la tienda `Image`, `Name`,
+- **La factura** (`services/ventas.js → facturaData` y antes `shareFactura`) pinta de la tienda `Image`, `Name`,
   `Address`, `RNC`, `Phone` y `Mail`. Es exactamente lo que se edita desde el teléfono (más el
   impuesto) → `feature/store`. `Settings.LogoInBill` **no** afecta a ese PDF: es de la térmica.
 
@@ -186,7 +186,7 @@ Columnas nuevas de `Sales` (`sql/F4_instrucciones_pago.sql`, **manual**, antes d
 - El PDF (`services/ventas.js → shareFactura`) pinta "Dónde pagar" salvo en `Complete` y
   `Cancelada`, y **solo** las cuentas activas, con número, que no son `Caja` y que son de la misma
   tienda que la venta. Se guardan ids, no una copia: si cambia el número, las facturas nuevas salen
-  con el nuevo (el PDF ya generado no cambia, petición 7).
+  con el nuevo (en la app, también las ya emitidas: se generan al abrirlas).
 
 > **Guard obligatorio al listar facturas: `Gasto IS NULL`.** Un gasto es una fila de `sales` con
 > `Gasto = true`, y la columna es *nullable*, así que filtrar por `Gasto = false` **no funciona**.
@@ -524,3 +524,29 @@ movimiento de cuenta.** Solo al cerrar una factura pagada.
 **`Spec` es la clave del flujo de compras**: la orden guarda la especificación completa del
 producto, y **solo al Confirmar** se crean de verdad `products` + `warehouse` con esos datos. Por
 eso una compra no toca inventario hasta que se confirma. Ver [09](09-documentos.md).
+
+## `invoiceconfig` — diseño de la factura (sql/F5, 2026-10-06)
+
+Un registro por tienda (`IdMarket`, UNIQUE KEY en la base, no en el modelo: con `sync({alter})`
+se duplicaría el índice en cada arranque, igual que `printerconfig`). Todo nullable con valor por
+defecto; la app trata `null` como el valor por defecto.
+
+| Campo | Tipo | Por defecto | Qué |
+|---|---|---|---|
+| `Title` | `VARCHAR(40)` | `Factura` | Título grande. La cotización se titula siempre "Cotización" |
+| `AccentColor` | `VARCHAR(9)` | `null` (= `#16426F`) | `#RRGGBB`; otra cosa se guarda como `null` |
+| `ShowLogo` · `ShowStoreInfo` | `TINYINT(1)` | `1` | Logo · RNC, dirección, teléfono y correo de la tienda |
+| `ShowClient` · `ShowClientContact` | `TINYINT(1)` | `1` | Nombre · cédula/RNC, dirección, teléfono, correo (de `Clients`) |
+| `ShowDueDate` · `ShowNcf` · `ShowTax` | `TINYINT(1)` | `1` | |
+| `ShowBalance` · `ShowPayments` | `TINYINT(1)` | `1` | Pagado y saldo · historial de abonos |
+| `ShowPaymentAccounts` · `ShowPaymentNote` | `TINYINT(1)` | `1` | "Dónde pagar" y sus instrucciones (solo si se debe o es cotización) |
+| `DefaultPaymentNote` | `TEXT` | `null` | Instrucciones cuando la venta no trae `PaymentNote` |
+| `ShowTerms` · `Terms` | `TINYINT(1)` · `TEXT` | `0` · texto | Condiciones antes de la firma |
+| `ShowSignature` · `SignatureName` · `Signature` | `TINYINT(1)` · `VARCHAR(120)` · `LONGTEXT` | `0` · `null` · `null` | Firma: SVG dibujado en la app (`viewBox 0 0 600 200`) |
+| `FooterMessage` | `TEXT` | `Gracias por su compra.` | |
+| `TemplateHtml` | `LONGTEXT` | `null` | Plantilla HTML entera como texto; `null` = la de la app |
+
+`GET ventas/factura/{id}/data` devuelve `client` con `Sales.Client`/`Sales.RNC` (lo que se
+facturó) completado con la ficha de `Clients` **solo si es de la misma tienda**, y `receivable`
+con el documento de `AccountDocuments` de la venta (sin crearlo: no llama a `from-sale`) y sus
+abonos `Aplicado`.

@@ -42,6 +42,19 @@ class RemoteImageLoader(private val client: HttpClient) {
         return image
     }
 
+    /**
+     * Los bytes tal cual (sin decodificar ni guardar en memoria): para embeber el logo de la
+     * tienda en la factura. `null` sin red o si el servidor no responde 2xx.
+     */
+    suspend fun bytes(url: String): ByteArray? = try {
+        val response = client.get(url)
+        if (response.status.isSuccess()) response.readRawBytes() else null
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
+
     private companion object {
         const val MAX_ENTRIES = 40
     }

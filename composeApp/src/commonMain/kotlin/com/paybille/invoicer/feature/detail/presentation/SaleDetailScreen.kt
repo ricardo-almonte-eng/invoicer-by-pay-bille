@@ -1,13 +1,11 @@
 package com.paybille.invoicer.feature.detail.presentation
 
 import com.paybille.invoicer.core.designsystem.theme.PbSymbols
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -32,8 +30,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -71,6 +67,7 @@ import com.paybille.invoicer.core.format.formatMoney
 import com.paybille.invoicer.core.format.formatQuantity
 import com.paybille.invoicer.core.format.formatShortDate
 import com.paybille.invoicer.core.format.parseApiTimestamp
+import com.paybille.invoicer.core.platform.HtmlView
 import com.paybille.invoicer.feature.detail.domain.PaymentMethod
 import com.paybille.invoicer.feature.detail.domain.SaleDetail
 import com.paybille.invoicer.feature.detail.domain.dueState
@@ -98,7 +95,7 @@ data class SaleDetailScreen(val saleId: Int? = null, val localId: String? = null
             Column(Modifier.fillMaxSize()) {
                 DetailTopBar(
                     title = title(state),
-                    pdfReady = state.pdf is PdfState.Ready,
+                    documentReady = state.document is DocumentState.Ready && !state.exporting,
                     onBack = { navigator.pop() },
                     onShare = model::share,
                     onDownload = model::download,
@@ -106,7 +103,9 @@ data class SaleDetailScreen(val saleId: Int? = null, val localId: String? = null
                 DetailBody(
                     state = state,
                     model = model,
-                    onOpenPdf = { path -> navigator.push(PdfViewerScreen(path, title(state))) },
+                    onOpenDocument = { html ->
+                        state.saleId?.let { navigator.push(InvoiceViewerScreen(it, html, title(state))) }
+                    },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -128,7 +127,7 @@ private fun title(state: DetailUiState): String {
 @Composable
 private fun DetailTopBar(
     title: String,
-    pdfReady: Boolean,
+    documentReady: Boolean,
     onBack: () -> Unit,
     onShare: () -> Unit,
     onDownload: () -> Unit,
@@ -142,7 +141,7 @@ private fun DetailTopBar(
             title = title,
             navigation = { PbIconButton(icon = PbSymbols.ArrowBack, contentDescription = "Volver", onClick = onBack) },
             actions = {
-                if (pdfReady) {
+                if (documentReady) {
                     PbIconButton(icon = PbSymbols.Download, contentDescription = "Descargar PDF", onClick = onDownload)
                     PbIconButton(icon = PbSymbols.Share, contentDescription = "Compartir PDF", onClick = onShare)
                 }
@@ -156,7 +155,7 @@ private fun DetailTopBar(
 private fun DetailBody(
     state: DetailUiState,
     model: SaleDetailScreenModel,
-    onOpenPdf: (String) -> Unit,
+    onOpenDocument: (String) -> Unit,
     modifier: Modifier,
 ) {
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
@@ -183,11 +182,12 @@ private fun DetailBody(
                 return@Column
             }
 
-            PdfHero(state = state, onWidth = model::onPreviewWidth, onRetry = { model.loadPdf(refresh = true) }, onOpen = onOpenPdf)
-            if (state.pdf is PdfState.Ready) {
+            DocumentHero(state = state, onRetry = model::refreshDocument, onOpen = onOpenDocument)
+            if (state.document is DocumentState.Ready) {
                 PbButton(
                     text = "Compartir",
                     onClick = model::share,
+                    loading = state.exporting,
                     leadingIcon = PbSymbols.Share,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -195,6 +195,7 @@ private fun DetailBody(
                     text = "Descargar PDF",
                     onClick = model::download,
                     variant = PbButtonVariant.Outline,
+                    enabled = !state.exporting,
                     leadingIcon = PbSymbols.Download,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -217,58 +218,58 @@ private fun DetailBody(
     }
 }
 
-// La "factura grande" como protagonista ---------------------------------------------------
+// La factura como protagonista ------------------------------------------------------------
 
+/**
+ * La factura que genera el teléfono, en un visor HTML con proporción de hoja A4. Aquí no hace
+ * scroll ni zoom: tocarla abre el visor completo.
+ */
 @Composable
-private fun PdfHero(
+private fun DocumentHero(
     state: DetailUiState,
-    onWidth: (Int) -> Unit,
     onRetry: () -> Unit,
     onOpen: (String) -> Unit,
 ) {
     val colors = PbTheme.colors
     val shape = RoundedCornerShape(PbRadius.md)
-    BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        // El documento ocupa el ancho disponible (hasta 420 dp) y queda centrado.
-        val width = maxWidth.coerceAtMost(420.dp)
-        val widthPx = with(LocalDensity.current) { width.roundToPx() }
-        LaunchedEffect(widthPx) { onWidth(widthPx) }
+    val frame = Modifier
+        .widthIn(max = 420.dp)
+        .fillMaxWidth()
+        .aspectRatio(A4_RATIO)
+        .clip(shape)
+        .border(PbControl.border, colors.outlineStrong, shape)
 
-        val pdf = state.pdf
-        val page = (pdf as? PdfState.Ready)?.pages?.firstOrNull()
-        val frame = Modifier
-            .widthIn(max = width)
-            .fillMaxWidth()
-            .clip(shape)
-            .border(PbControl.border, colors.outlineStrong, shape)
-
-        if (pdf is PdfState.Ready && page != null) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(PbSpace.s3)) {
-                Image(
-                    bitmap = page,
-                    contentDescription = "Vista previa de la factura. Toca para verla completa.",
-                    contentScale = ContentScale.FillWidth,
-                    modifier = frame
-                        .aspectRatio(page.width.toFloat() / page.height.toFloat())
-                        .clickable(role = Role.Button, onClickLabel = "Ver la factura completa") { onOpen(pdf.path) },
-                )
-                PbText(
-                    text = if (pdf.pages.size > 1) "${pdf.pages.size} páginas · toca para verlas" else "Toca para verla completa",
-                    style = PbTheme.typography.caption,
-                    color = colors.muted,
+    val document = state.document
+    if (document is DocumentState.Ready) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(PbSpace.s3),
+        ) {
+            Box(frame) {
+                HtmlView(html = document.html, modifier = Modifier.fillMaxSize(), interactive = false)
+                // Encima del visor: el toque es de Compose, no del WebView.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clickable(role = Role.Button, onClickLabel = "Ver la factura completa") { onOpen(document.html) }
+                        .semantics { contentDescription = "Vista previa de la factura. Toca para verla completa." },
                 )
             }
-            return@BoxWithConstraints
+            PbText(text = "Toca para verla completa", style = PbTheme.typography.caption, color = colors.muted)
         }
+        return
+    }
 
-        // Mientras no hay PDF: una hoja A4 vacía con el estado en el centro.
+    // Mientras no hay datos: una hoja vacía con el estado en el centro.
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Column(
-            modifier = frame.aspectRatio(A4_RATIO).background(colors.surfaceSubtle).padding(PbSpace.s8),
+            modifier = frame.background(colors.surfaceSubtle).padding(PbSpace.s8),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(PbSpace.s4, Alignment.CenterVertically),
         ) {
-            when (pdf) {
-                PdfState.Idle, PdfState.Loading, is PdfState.Ready -> {
+            when (document) {
+                DocumentState.Loading, is DocumentState.Ready -> {
                     PbSpinner(size = 32.dp)
                     PbText(
                         text = "Preparando la factura…",
@@ -276,27 +277,21 @@ private fun PdfHero(
                         color = colors.ink2,
                         textAlign = TextAlign.Center,
                     )
-                    PbText(
-                        text = "La primera vez el servidor la genera: puede tardar unos segundos.",
-                        style = PbTheme.typography.caption,
-                        color = colors.muted,
-                        textAlign = TextAlign.Center,
-                    )
                 }
-                PdfState.Offline -> {
+                DocumentState.Offline -> {
                     PbIcon(icon = PbSymbols.CloudOff, contentDescription = null, tint = colors.muted, size = 40.dp)
                     PbText(
-                        text = "Sin conexión: el PDF se descargará cuando vuelva la red.",
+                        text = "Sin conexión: la factura se verá cuando vuelva la red. Después queda guardada en el teléfono.",
                         style = PbTheme.typography.body,
                         color = colors.ink2,
                         textAlign = TextAlign.Center,
                     )
                     PbButton(text = "Reintentar", onClick = onRetry, variant = PbButtonVariant.Outline, leadingIcon = PbSymbols.Sync)
                 }
-                is PdfState.Failed -> {
+                is DocumentState.Failed -> {
                     PbIcon(icon = PbSymbols.Error, contentDescription = null, tint = colors.error, size = 40.dp)
                     PbText(
-                        text = pdf.message.ifBlank { "No se pudo obtener el PDF." },
+                        text = document.message.ifBlank { "No se pudo obtener la factura." },
                         style = PbTheme.typography.body,
                         color = colors.ink2,
                         textAlign = TextAlign.Center,
@@ -331,7 +326,7 @@ private fun PendingHero(pending: PendingDocument?, onRetry: () -> Unit) {
                 PbSpinner(size = 32.dp)
                 PbText("Enviando…", style = PbTheme.typography.subtitle, textAlign = TextAlign.Center)
                 PbText(
-                    "En cuanto llegue al servidor verás aquí la factura en PDF.",
+                    "En cuanto llegue al servidor verás aquí la factura.",
                     style = PbTheme.typography.body,
                     color = colors.muted,
                     textAlign = TextAlign.Center,
@@ -566,6 +561,6 @@ private fun PaymentSheet(state: DetailUiState, model: SaleDetailScreenModel) {
     }
 }
 
-/** Proporción de una hoja A4 (ancho / alto) para el hueco mientras llega el PDF. */
+/** Proporción de una hoja A4 (ancho / alto) para la vista previa de la factura. */
 private const val A4_RATIO = 210f / 297f
 private const val NOTICE_MS = 4_000L

@@ -102,7 +102,7 @@ Reglas:
 | `sales` | Lista del Inicio (cabeceras) |
 | `sale_details` | Detalle ya visto (`SaleDetail` en JSON), para abrirlo sin red |
 | `receivables` | Cuentas por cobrar con saldo: vencimientos del Inicio y avisos |
-| `cached_payloads` (v5) | Respuesta de la API en JSON por clave: `dashboard:{rango}`, `report:{reporte}:{rango}`, `balances:Cobrar`, `client:{id}`, `product:{id}`, `inventory:info`, `catalog:categories` · `catalog:brands` · `catalog:colors`, `catalog:shownIds` (ids con `IndShowOnCatalog`), `invoice:payTo` (lo último elegido en "Dónde pagar", prellena la siguiente factura: `CachedPayToMemory`). Lo que no se consulta por columnas no necesita tabla propia (`PayloadCache`) |
+| `cached_payloads` (v5) | Respuesta de la API en JSON por clave: `dashboard:{rango}`, `report:{reporte}:{rango}`, `balances:Cobrar`, `client:{id}`, `product:{id}`, `inventory:info`, `catalog:categories` · `catalog:brands` · `catalog:colors`, `catalog:shownIds` (ids con `IndShowOnCatalog`), `invoice:payTo` (lo último elegido en "Dónde pagar", prellena la siguiente factura: `CachedPayToMemory`). La factura generada: `invoice-doc:{saleId}` (datos de `ventas/factura/{id}/data`), `invoice-config` (diseño de la tienda) e `invoice-logo` (`{ url, dataUri }`) → `InvoiceDocumentRepository`. Lo que no se consulta por columnas no necesita tabla propia (`PayloadCache`) |
 | `products` (v5) | Inventario **agrupado por nombre** (`productinventory/allgrouped`): copia completa, se busca en el teléfono |
 | `clients` (v5) | Clientes de la tienda: copia completa, se busca en el teléfono |
 | `bank_accounts` (v5; v6 + `holderName`, `holderId`) | Cuentas de dinero con su balance y su titular. `canReceiveTransfers`: activa, no `Caja` y con número (las que ofrece "Dónde pagar") |

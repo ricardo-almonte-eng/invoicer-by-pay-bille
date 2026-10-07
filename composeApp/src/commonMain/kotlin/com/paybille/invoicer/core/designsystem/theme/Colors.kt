@@ -67,6 +67,8 @@ data class PbColors(
     val backdrop: Color,
     /** Fondo de los logos de bancos: son JPG/PNG sobre blanco y en oscuro no se pueden invertir. */
     val logoPlate: Color,
+    /** Tinta sobre papel (la firma): oscura también en tema oscuro, porque el papel es blanco. */
+    val paperInk: Color,
 
     val isDark: Boolean,
 )
@@ -97,6 +99,7 @@ val LightPbColors = PbColors(
     inputContainer = Color(0xFFE5E9F3),
     backdrop = Color(0x59101A42), // rgba(16, 26, 66, 0.35)
     logoPlate = Color(0xFFFFFFFF),
+    paperInk = Color(0xFF101A42),
 
     isDark = false,
 )
@@ -129,6 +132,21 @@ val DarkPbColors = PbColors(
     inputContainer = Color(0xFF1B2237),
     backdrop = Color(0x99040710), // rgba(4, 7, 16, 0.6)
     logoPlate = Color(0xFFFFFFFF),
+    paperInk = Color(0xFF101A42),
 
     isDark = true,
+)
+
+/**
+ * Colores de acento que se pueden elegir para la factura (`invoiceconfig.AccentColor`). Son del
+ * papel, no del tema: iguales en claro y oscuro. El hex es lo que viaja a la plantilla.
+ */
+val InvoiceAccentOptions: List<Pair<String, Color>> = listOf(
+    "#16426F" to Color(0xFF16426F), // azul PayBille (por defecto)
+    "#101A42" to Color(0xFF101A42),
+    "#0E7490" to Color(0xFF0E7490),
+    "#0B7A54" to Color(0xFF0B7A54),
+    "#D2601A" to Color(0xFFD2601A),
+    "#C82F2F" to Color(0xFFC82F2F),
+    "#6B3FA0" to Color(0xFF6B3FA0),
 )

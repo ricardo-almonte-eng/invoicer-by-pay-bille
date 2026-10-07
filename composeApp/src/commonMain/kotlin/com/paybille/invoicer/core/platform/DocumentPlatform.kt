@@ -17,6 +17,14 @@ interface DocumentPlatform {
      */
     suspend fun renderPdf(path: String, widthPx: Int, maxPages: Int = MAX_PREVIEW_PAGES): List<ImageBitmap>
 
+    /**
+     * Convierte el HTML de la factura en un PDF A4 en `outputPath`, en el teléfono y sin red
+     * (lo que antes hacía el servidor con Puppeteer). Las páginas se cortan entre filas y
+     * bloques (`tr`, `.blk`), nunca a mitad de una línea.
+     * @throws IllegalStateException si el sistema no pudo generarlo.
+     */
+    suspend fun htmlToPdf(html: String, outputPath: String)
+
     /** Abre la hoja de compartir del sistema (WhatsApp, correo…). */
     fun share(path: String, mimeType: String, title: String)
 

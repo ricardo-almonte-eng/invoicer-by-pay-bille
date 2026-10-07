@@ -126,6 +126,26 @@ Detalle del flujo → [12-flujo-de-trabajo.md](documentacion/guidelines/12-flujo
 
 ## Contexto activo
 
+### 2026-10-06 — Factura generada en la app (plantilla HTML por tienda)
+- **Problema del usuario:** la factura PDF que arma el backend (Puppeteer) tarda y falla al
+  mostrarse. Quiere un endpoint que devuelva solo los **datos** y que la app la genere, con un
+  formato como el PDF de ejemplo (Bookipi) pero con nuestra identidad, y **configurable por tienda**
+  (cliente, datos propios, detalle, pagos, pendiente, métodos e instrucciones de pago, firma, logo).
+- **Qué se hizo:** API: `GET ventas/factura/:id/data` (solo datos, con token) y `invoiceconfig`
+  (una por tienda, `GET/POST invoiceConfig/:IdMarket`, `sql/F5`). App: `feature/document` —
+  plantilla `files/invoice_template.html` + `MiniTemplate` (Mustache mínimo) + `InvoiceHtml`;
+  `HtmlView` (expect/actual WebView/WKWebView); PDF en el teléfono (`DocumentPlatform.htmlToPdf`);
+  pantalla "Diseño de factura" (Mi perfil) con vista previa y firma en SVG. Detalle → guía 06.
+- **Por qué así:** la configuración por columnas (como `printerconfig`) y `TemplateHtml` como texto
+  opcional, en vez de guardar solo HTML: la app puede mejorar su plantilla sin migrar tiendas.
+  Datos en `cached_payloads`: se ve sin red y al instante. PDF en Android por `PdfDocument` (API
+  pública) y no por `createPrintDocumentAdapter` (callbacks ocultos).
+- **Estado:** compila en Android sin avisos; **106 pruebas** en verde. **Probado en el emulador**
+  contra la API local (DEV): detalle, visor, compartir (PDF A4 de 1 página), diseño guardado y
+  aplicado. iOS (`HtmlView`, `IosHtmlPdf`) pendiente de Xcode. `F5` a mano antes de desplegar.
+- **Qué mirar:** factura larga (30+ líneas) → cortes de página del PDF; logo real (en DEV da
+  404); 360 dp, letra grande y tema oscuro en "Diseño de factura"; firma con el dedo.
+
 ### 2026-09-27 (4) — Dónde pagar, notificaciones y catálogo compartible
 - **Problema del usuario:** notificaciones (la campana era un "próximamente"); al crear la factura,
   elegir **dónde pagar** (varias cuentas) e instrucciones, y que salgan en el PDF (tocar el
@@ -159,28 +179,3 @@ Detalle del flujo → [12-flujo-de-trabajo.md](documentacion/guidelines/12-flujo
 - **Qué mirar:** listas a 360 dp y letra grande (tarjetas, importes que bajan de línea); tema
   oscuro (franja y etiquetas); una factura vencida, una que vence hoy, otra en 2 días, otra en 10;
   una pagada (sin bloque "DEBE").
-
-### 2026-09-27 (2) — Isotipo, cambio de tienda que se colgaba, configuración de tienda, fotos de productos
-- **Problema del usuario:** en la cabecera quiere el isotipo de PayBille; al cambiar de tienda la
-  hoja se quedaba cargando (y debe cerrarse); la hoja de tiendas ocupaba toda la pantalla (poner
-  alto máximo). Configuración de la tienda en versión reducida. Cámara para la imagen del producto
-  y marca, color, categoría como en el POS.
-- **Qué se hizo:** `MainScreen(idMarket)` con clave por tienda; la hoja se cierra al terminar y
-  tiene buscador con más de 6 tiendas. Toda `PbSheet` mide como mucho el 85 %. Cabecera con el
-  isotipo. `feature/store`: configuración reducida (Mi perfil → Configurar tienda). Productos:
-  imagen (`rememberImagePicker` expect/actual + `image/upload` multipart + `RemoteImage`),
-  categoría/marca/color con `PbSelectField` + `PbOptionSheet` y alta rápida.
-- **Descubierto:** Voyager guarda los `ScreenModel` por `screen.key` (sin el Navigator): con clave
-  fija el armazón nuevo heredaba los modelos que el viejo desechaba → era el "cargando". El sobre
-  `{ data, meta }` **solo** va en GET y POST con `isGet`; `mine`, `switch`, PUT, `postGeneric` e
-  `image/upload` llegan sin él (el cliente ya lo toleraba). La factura PDF solo usa logo, nombre,
-  dirección, RNC, teléfono y correo de la tienda. Marca y color van en `warehouse`; categoría en
-  `products` (0 = ninguna). Compose Resources no admite subcarpetas en `drawable/`.
-- **Estado:** compila en Android sin avisos; **76 pruebas** en verde. iOS (cámara) pendiente de
-  Xcode. Los logos de bancos que añadió el usuario en `drawable/banks/` rompían el build (no se
-  admiten subcarpetas): quedaron planos como `drawable/bank_*.{png,jpg}` (`git mv`) y se usan en
-  Bancos y en la hoja de cuentas del editor (`core/ui/BankLogo.kt`). 79 pruebas.
-- **Qué mirar:** cambiar de tienda (la hoja se cierra y todo se recarga); hoja de tiendas larga;
-  configurar tienda con y sin red (logo PNG transparente → que no salga negro en el PDF); foto de
-  producto con la cámara en vertical (que no salga girada), desde la galería, quitar; crear
-  categoría/marca/color sin red; ficha del producto con imagen; 360 dp y tema oscuro.

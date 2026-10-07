@@ -40,6 +40,10 @@ class AndroidDocumentPlatform(private val context: Context) : DocumentPlatform {
             }
         }
 
+    private val htmlPdf = AndroidHtmlPdf(context)
+
+    override suspend fun htmlToPdf(html: String, outputPath: String) = htmlPdf.write(html, outputPath)
+
     override fun share(path: String, mimeType: String, title: String) {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(path))
         val send = Intent(Intent.ACTION_SEND).apply {

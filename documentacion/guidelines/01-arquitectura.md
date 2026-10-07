@@ -30,7 +30,8 @@ cosa:
 | `expect` | Android | iOS |
 |---|---|---|
 | `platformModule` (Koin) | Ruta de la base con `androidContext()` | Ruta en `Application Support` |
-| ↳ `DocumentPlatform` | `PdfRenderer` · `FileProvider` + `ACTION_SEND` · `MediaStore` Descargas | PDFKit · `UIActivityViewController` · `UIDocumentPickerViewController` |
+| ↳ `DocumentPlatform` | `PdfRenderer` · `FileProvider` + `ACTION_SEND` · `MediaStore` Descargas · HTML→PDF con WebView + `PdfDocument` | PDFKit · `UIActivityViewController` · `UIDocumentPickerViewController` · HTML→PDF con `UIPrintPageRenderer` |
+| ↳ `HtmlView` (composable) | `WebView` (`AndroidView`) | `WKWebView` (`UIKitView`) |
 | ↳ `ReminderScheduler` | WorkManager + `NotificationCompat` | `UNUserNotificationCenter` |
 | `NotificationPermissionRequest` (composable) | `POST_NOTIFICATIONS` (13+) | `requestAuthorization` |
 | `rememberImagePicker` (composable) | `TakePicture` a `cache/captures` por FileProvider · `PickVisualMedia`; submuestreo, giro EXIF (`android.media.ExifInterface`), ≤ 1280 px, JPEG 85 o PNG si hay transparencia. **Sin permiso de cámara**: no se declara `CAMERA` (si se declarara, `TakePicture` exigiría pedirlo) | `UIImagePickerController` (cámara / fotos), redibujo que endereza, ≤ 1280 px. `NSCameraUsageDescription` y `NSPhotoLibraryUsageDescription` en `iosApp/Info.plist` |
@@ -110,8 +111,22 @@ pública que en el POS (Nuxt la expone en `runtimeConfig.public`), así que no e
 pero **no metas ahí ningún secreto nuevo**.
 
 ⚠️ Desde el emulador de Android, `localhost` es el propio emulador: la API local está en
-`http://10.0.2.2:2001/ventex/api`. Y Android bloquea `http://` en claro por defecto: para probar
-contra la API local hará falta un `network_security_config` de depuración.
+`http://10.0.2.2:2001/ventex/api`. Android bloquea `http://` en claro; **solo en debug**
+(`androidApp/src/debug/res/xml/network_security_config.xml`) se permite hacia `localhost` y
+`10.0.2.2`. Para probar contra la API local sin tocar `local.properties` (2026-10-06):
+
+```bash
+adb reverse tcp:2001 tcp:2001
+./gradlew :androidApp:installDebug -Ppaybille.apiBaseUrl=http://localhost:2001/ventex/api
+```
+
+`-P` solo vale si `local.properties` no trae ya la clave (gana el archivo). La sesión guardada
+sirve contra la API local si su `.env` firma con la misma `SECRERTKEY`. Una compilación normal
+vuelve a la API de producción.
+
+⚠️ El `.env` de `PayBille_API` puede apuntar a **PAYBILLE_DB_PROD** y `_context.js` puede tener
+`sequelize.sync({alter: true})` activo: arrancarla así altera el esquema de **producción**. Para
+probar, `DB_DEV_NAME=PAYBILLE_DB_DEV node index.js` (dotenv no pisa una variable ya puesta).
 
 ## Arranque y sesión (offline first)
 

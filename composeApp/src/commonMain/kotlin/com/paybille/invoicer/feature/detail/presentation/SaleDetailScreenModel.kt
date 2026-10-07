@@ -1,6 +1,5 @@
 package com.paybille.invoicer.feature.detail.presentation
 
-import androidx.compose.ui.graphics.ImageBitmap
 import cafe.adriel.voyager.core.model.StateScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.paybille.invoicer.core.billing.round2
@@ -14,6 +13,7 @@ import com.paybille.invoicer.feature.detail.data.InvoicePdfStore
 import com.paybille.invoicer.feature.detail.data.SaleDetailRepository
 import com.paybille.invoicer.feature.detail.domain.PaymentMethod
 import com.paybille.invoicer.feature.detail.domain.SaleDetail
+import com.paybille.invoicer.feature.document.data.InvoiceDocumentRepository
 import com.paybille.invoicer.feature.invoice.data.InvoiceRepository
 import com.paybille.invoicer.feature.invoice.data.InvoiceSender
 import com.paybille.invoicer.feature.invoice.data.remote.CatalogRemoteDataSource
@@ -21,6 +21,8 @@ import com.paybille.invoicer.feature.invoice.domain.DraftAccount
 import com.paybille.invoicer.feature.invoice.domain.PendingDocument
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.update
@@ -33,14 +35,14 @@ import kotlin.time.ExperimentalTime
 /** Qué venta muestra el detalle: una del servidor, o una recién guardada que aún se envía. */
 data class DetailTarget(val saleId: Int?, val localId: String?)
 
-sealed interface PdfState {
-    data object Idle : PdfState
-    data object Loading : PdfState
-    data class Ready(val path: String, val pages: List<ImageBitmap>) : PdfState
+/** La factura que genera el teléfono (HTML), no un PDF del servidor. */
+sealed interface DocumentState {
+    data object Loading : DocumentState
+    data class Ready(val html: String) : DocumentState
 
-    /** Sin red y sin copia en el teléfono. */
-    data object Offline : PdfState
-    data class Failed(val message: String) : PdfState
+    /** Sin red y todavía sin datos guardados de esta factura. */
+    data object Offline : DocumentState
+    data class Failed(val message: String) : DocumentState
 }
 
 data class PaymentForm(
@@ -60,7 +62,9 @@ data class DetailUiState(
     val refreshing: Boolean = false,
     val offline: Boolean = false,
     val error: String? = null,
-    val pdf: PdfState = PdfState.Idle,
+    val document: DocumentState = DocumentState.Loading,
+    /** Generando el PDF para compartir o descargar. */
+    val exporting: Boolean = false,
     val todayIso: String = "",
     val timeZone: String = DEFAULT_TIME_ZONE,
     val paymentOpen: Boolean = false,
@@ -72,8 +76,9 @@ data class DetailUiState(
 )
 
 /**
- * Detalle de una factura o cotización: la "factura grande" en PDF como protagonista, su
- * estado de cobro, vencimiento y abonos. Offline first: pinta lo guardado y refresca.
+ * Detalle de una factura o cotización: la factura (HTML que genera el teléfono con los datos de
+ * `ventas/factura/{id}/data` y la configuración de la tienda) como protagonista, su estado de
+ * cobro, vencimiento y abonos. Offline first: pinta lo guardado y refresca.
  */
 @OptIn(ExperimentalTime::class)
 class SaleDetailScreenModel(
@@ -81,6 +86,7 @@ class SaleDetailScreenModel(
     private val sessions: SessionRepository,
     private val details: SaleDetailRepository,
     private val pdfs: InvoicePdfStore,
+    private val documents: InvoiceDocumentRepository,
     private val platform: DocumentPlatform,
     private val invoices: InvoiceRepository,
     private val sender: InvoiceSender,
@@ -88,8 +94,7 @@ class SaleDetailScreenModel(
 ) : StateScreenModel<DetailUiState>(DetailUiState()) {
 
     private var session: Session? = null
-    private var previewWidthPx: Int = 0
-    private var pdfJob: Job? = null
+    private var exportJob: Job? = null
 
     init {
         screenModelScope.launch {
@@ -121,8 +126,21 @@ class SaleDetailScreenModel(
         screenModelScope.launch {
             details.observe(saleId).collect { detail -> mutableState.update { it.copy(detail = detail) } }
         }
+        observeDocument(saleId)
         refresh()
-        if (previewWidthPx > 0) loadPdf(refresh = false)
+    }
+
+    /** Lo guardado de la factura + la configuración de la tienda → HTML. Se rehace solo si cambian. */
+    private fun observeDocument(saleId: Int) {
+        val current = session ?: return
+        screenModelScope.launch {
+            combine(documents.observe(current.idMarket, saleId), documents.observeConfig(current.idMarket)) { data, config -> data to config }
+                .collectLatest { (data, config) ->
+                    if (data == null) return@collectLatest
+                    val html = documents.html(current.idMarket, data.value, config, state.value.timeZone, state.value.todayIso)
+                    mutableState.update { it.copy(document = DocumentState.Ready(html)) }
+                }
+        }
     }
 
     fun refresh() {
@@ -139,56 +157,59 @@ class SaleDetailScreenModel(
                 mutableState.update { it.copy(refreshing = false) }
             }
         }
+        refreshDocument()
     }
 
-    /** La vista previa ya sabe su ancho: se descarga (si hace falta) y se dibuja. */
-    fun onPreviewWidth(widthPx: Int) {
-        if (widthPx <= 0 || widthPx == previewWidthPx) return
-        previewWidthPx = widthPx
-        if (state.value.saleId != null) loadPdf(refresh = false)
-    }
-
-    fun loadPdf(refresh: Boolean = true) {
+    /** Pide los datos de la factura. Con copia guardada, un fallo no la tapa. */
+    fun refreshDocument() {
         val saleId = state.value.saleId ?: return
-        pdfJob?.cancel()
-        mutableState.update { it.copy(pdf = PdfState.Loading) }
-        pdfJob = screenModelScope.launch {
+        val current = session ?: return
+        screenModelScope.launch {
+            if (state.value.document !is DocumentState.Ready) mutableState.update { it.copy(document = DocumentState.Loading) }
             try {
-                val path = pdfs.ensure(saleId, refresh = refresh)
-                val pages = platform.renderPdf(path, previewWidthPx.coerceAtLeast(MIN_RENDER_PX))
-                mutableState.update {
-                    it.copy(pdf = if (pages.isEmpty()) PdfState.Failed("El PDF no se pudo abrir.") else PdfState.Ready(path, pages))
-                }
-            } catch (e: CancellationException) {
-                throw e
+                documents.refresh(current.idMarket, saleId)
             } catch (e: ApiException) {
-                mutableState.update { it.copy(pdf = if (e.isConnectivity) PdfState.Offline else PdfState.Failed(e.message ?: "")) }
-            } catch (e: Exception) {
-                mutableState.update { it.copy(pdf = PdfState.Failed("El PDF no se pudo abrir.")) }
+                mutableState.update {
+                    if (it.document is DocumentState.Ready) it
+                    else it.copy(document = if (e.isConnectivity) DocumentState.Offline else DocumentState.Failed(e.message ?: ""))
+                }
             }
         }
     }
 
-    fun share() {
-        val ready = state.value.pdf as? PdfState.Ready ?: return
-        runCatching { platform.share(ready.path, PDF_MIME, documentTitle()) }
-            .onFailure { e -> mutableState.update { it.copy(notice = "No se pudo compartir: ${e.message}") } }
+    fun share() = export { path ->
+        platform.share(path, PDF_MIME, documentTitle())
+        null
     }
 
-    fun download() {
-        val ready = state.value.pdf as? PdfState.Ready ?: return
-        screenModelScope.launch {
-            val notice = when (val result = platform.saveCopy(ready.path, "${documentTitle().replace(" ", "-")}.pdf", PDF_MIME)) {
-                is SaveResult.Saved -> "PDF guardado en ${result.where}."
-                SaveResult.PickerShown -> null
-                SaveResult.UseShare -> {
-                    // Android 9 o menos: se guarda desde la hoja de compartir.
-                    platform.share(ready.path, PDF_MIME, documentTitle())
-                    "Elige \"Guardar\" o \"Archivos\" en el menú para descargarlo."
-                }
-                is SaveResult.Failed -> result.message
+    fun download() = export { path ->
+        when (val result = platform.saveCopy(path, "${documentTitle().replace(" ", "-")}.pdf", PDF_MIME)) {
+            is SaveResult.Saved -> "PDF guardado en ${result.where}."
+            SaveResult.PickerShown -> null
+            SaveResult.UseShare -> {
+                // Android 9 o menos: se guarda desde la hoja de compartir.
+                platform.share(path, PDF_MIME, documentTitle())
+                "Elige \"Guardar\" o \"Archivos\" en el menú para descargarlo."
             }
-            mutableState.update { it.copy(notice = notice) }
+            is SaveResult.Failed -> result.message
+        }
+    }
+
+    /** Genera el PDF en el teléfono, con lo que se ve ahora, y se lo pasa a `then`. */
+    private fun export(then: suspend (path: String) -> String?) {
+        val saleId = state.value.saleId ?: return
+        val ready = state.value.document as? DocumentState.Ready ?: return
+        if (exportJob?.isActive == true) return
+        mutableState.update { it.copy(exporting = true) }
+        exportJob = screenModelScope.launch {
+            val notice = try {
+                then(pdfs.write(saleId, ready.html))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                "No se pudo generar el PDF: ${e.message ?: "inténtalo otra vez"}."
+            }
+            mutableState.update { it.copy(exporting = false, notice = notice) }
         }
     }
 
@@ -258,13 +279,9 @@ class SaleDetailScreenModel(
                     idCuenta = form.account?.id,
                     reference = form.reference,
                 )
-                mutableState.update {
-                    it.copy(
-                        paymentOpen = false,
-                        payment = PaymentForm(),
-                        notice = "Pago registrado. El PDF del servidor puede tardar en mostrar el nuevo saldo.",
-                    )
-                }
+                mutableState.update { it.copy(paymentOpen = false, payment = PaymentForm(), notice = "Pago registrado.") }
+                // La factura enseña el saldo nuevo en cuanto llegan los datos.
+                refreshDocument()
             } catch (e: ApiException) {
                 val message = if (e.isConnectivity) "Sin conexión: el pago no se registró. Inténtalo con red." else e.message
                 updateForm { it.copy(saving = false, error = message) }
@@ -288,7 +305,6 @@ class SaleDetailScreenModel(
 
     private companion object {
         const val PDF_MIME = "application/pdf"
-        const val MIN_RENDER_PX = 600
         const val MAX_REFERENCE = 120
     }
 }

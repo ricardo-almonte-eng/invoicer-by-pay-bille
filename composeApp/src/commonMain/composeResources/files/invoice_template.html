@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{doc.title}} {{doc.number}}</title>
+<!--
+  Plantilla de la factura de Invoicer By PayBille. La rellena la app (MiniTemplate: {{campo}},
+  {{{campo}}} sin escapar, {{#lista}}…{{/lista}}, {{^campo}}…{{/campo}}) con los datos de
+  GET ventas/factura/{id}/data y la configuración de la tienda (invoiceconfig).
+  Es papel: fondo blanco siempre, también con el teléfono en tema oscuro.
+  .blk y las filas marcan dónde se puede cortar una página al generar el PDF.
+-->
+<style>
+{{{fontCss}}}
+:root {
+  --ink: #101A42; --ink2: #414D75; --muted: #5B6689; --muted2: #8A94B2;
+  --line: #DDE4EE; --soft: #F3F5FA; --paper: #FFFFFF;
+  --accent: {{accent}}; --accent-soft: {{accentSoft}};
+  --ok: #0B7A54; --ok-soft: #EAF7F1; --warn: #D2601A; --warn-soft: #FFEEE2; --bad: #C82F2F; --bad-soft: #FFF5F5;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink); }
+body {
+  font-family: 'PB Sans', -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px; line-height: 1.45; -webkit-text-size-adjust: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.page { max-width: 794px; margin: 0 auto; padding: 40px 44px 28px; }
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.muted { color: var(--muted); }
+.small { font-size: 11.5px; }
+.label { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+
+/* Cabecera */
+.head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+.title { font-size: 30px; font-weight: 700; letter-spacing: -.01em; color: var(--accent); margin: 0 0 14px; line-height: 1.1; }
+.store-name { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+.store-info { color: var(--muted); font-size: 12px; }
+.store-info div { margin: 1px 0; }
+.logo { max-width: 150px; max-height: 84px; object-fit: contain; border-radius: 8px; }
+
+/* Bloque cliente + datos del documento */
+.meta { margin-top: 26px; border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+  display: flex; justify-content: space-between; gap: 24px; }
+.meta .to { flex: 1 1 auto; min-width: 0; }
+.client-name { font-size: 16px; font-weight: 600; margin: 4px 0 4px; }
+.client-info { color: var(--muted); font-size: 12px; }
+.client-info div { margin: 1px 0; overflow-wrap: anywhere; }
+.facts { flex: 0 0 auto; display: grid; grid-template-columns: auto auto; column-gap: 22px; row-gap: 9px; align-content: start; }
+.facts .label { align-self: center; }
+.facts .v { text-align: right; font-weight: 500; }
+.pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.pill.paid { background: var(--ok-soft); color: var(--ok); }
+.pill.pending { background: var(--warn-soft); color: var(--warn); }
+.pill.overdue { background: var(--bad-soft); color: var(--bad); }
+.pill.quote, .pill.void { background: var(--soft); color: var(--ink2); }
+
+/* Artículos */
+table { width: 100%; border-collapse: collapse; }
+.items { margin-top: 26px; }
+.items th { background: var(--soft); text-align: left; font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink2); padding: 9px 10px; }
+.items th:first-child { border-radius: 8px 0 0 8px; }
+.items th:last-child { border-radius: 0 8px 8px 0; }
+.items td { padding: 11px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.items .r { text-align: right; }
+.items .c { text-align: center; }
+.item-name { font-weight: 500; }
+.item-sub { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+.item-calc { display: none; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+
+/* Totales */
+.totals-wrap { display: flex; justify-content: flex-end; margin-top: 14px; }
+.totals { width: 330px; }
+.totals td { padding: 6px 10px; }
+.totals td:last-child { text-align: right; }
+.totals .grand td { border-top: 1px solid var(--line); padding-top: 10px; font-size: 15px; font-weight: 700; }
+.balance { margin-top: 12px; display: flex; justify-content: space-between; align-items: baseline;
+  background: var(--accent-soft); border-radius: 10px; padding: 12px 14px; }
+.balance .k { font-size: 15px; font-weight: 600; }
+.balance .v { font-size: 20px; font-weight: 700; color: var(--accent); }
+.balance .due { display: block; font-size: 11.5px; font-weight: 500; color: var(--muted); }
+.stamp { margin-top: 12px; text-align: right; color: var(--ok); font-weight: 700; letter-spacing: .12em; font-size: 13px; }
+
+/* Secciones de abajo */
+.section { margin-top: 26px; }
+.section h3 { font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2);
+  margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.pays td { padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.pays td:last-child { text-align: right; }
+.accounts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.account { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.account .bank { font-weight: 600; }
+.account .number { font-size: 14px; font-weight: 600; letter-spacing: .02em; margin: 2px 0; }
+.note { margin-top: 10px; background: var(--soft); border-radius: 10px; padding: 10px 12px; white-space: pre-line; }
+.terms { color: var(--ink2); font-size: 12px; white-space: pre-line; }
+.sign { margin-top: 18px; width: 260px; text-align: center; }
+.sign .who { font-weight: 600; font-size: 12px; }
+.sign .art { height: 70px; display: flex; align-items: flex-end; justify-content: center; }
+.sign .art svg { max-height: 70px; max-width: 240px; }
+.sign .line { border-top: 1px solid var(--muted2); margin-top: 4px; padding-top: 4px; color: var(--muted); font-size: 11.5px; }
+.thanks { margin-top: 26px; text-align: center; color: var(--ink2); }
+.brand { margin-top: 26px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--soft); border-radius: 10px; padding: 9px 14px; color: var(--muted); font-size: 11px; }
+.brand .mark { display: flex; align-items: center; gap: 8px; }
+.brand img { width: 16px; height: 16px; }
+.brand .doc { white-space: nowrap; }
+
+/* Teléfono: la misma factura, apilada */
+@media (max-width: 560px) {
+  .page { padding: 22px 16px 18px; }
+  .title { font-size: 24px; }
+  .meta { flex-direction: column; gap: 14px; }
+  .facts { grid-template-columns: auto 1fr; }
+  .items .opt { display: none; }
+  .item-calc { display: block; }
+  .totals { width: 100%; }
+  .sign { width: 100%; }
+  .brand .doc { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head blk">
+    <div>
+      <h1 class="title">{{doc.title}}</h1>
+      <div class="store-name">{{store.name}}</div>
+      {{#showStoreInfo}}
+      <div class="store-info">
+        {{#store.rnc}}<div>RNC {{store.rnc}}</div>{{/store.rnc}}
+        {{#store.address}}<div>{{store.address}}</div>{{/store.address}}
+        {{#store.phone}}<div>{{store.phone}}</div>{{/store.phone}}
+        {{#store.email}}<div>{{store.email}}</div>{{/store.email}}
+      </div>
+      {{/showStoreInfo}}
+    </div>
+    {{#store.logo}}<img class="logo" src="{{store.logo}}" alt="">{{/store.logo}}
+  </div>
+
+  <div class="meta blk">
+    <div class="to">
+      {{#showClient}}
+      <div class="label">Para</div>
+      <div class="client-name">{{client.name}}</div>
+      {{#showClientContact}}
+      <div class="client-info">
+        {{#client.identify}}<div>RNC/Cédula {{client.identify}}</div>{{/client.identify}}
+        {{#client.address}}<div>{{client.address}}</div>{{/client.address}}
+        {{#client.phone}}<div>{{client.phone}}</div>{{/client.phone}}
+        {{#client.email}}<div>{{client.email}}</div>{{/client.email}}
+      </div>
+      {{/showClientContact}}
+      {{/showClient}}
+      {{^showClient}}<div class="label">{{doc.kindLabel}}</div><div class="client-name">#{{doc.number}}</div>{{/showClient}}
+    </div>
+    <div class="facts">
+      <span class="label">{{doc.kindLabel}} N.º</span><span class="v num">{{doc.number}}</span>
+      <span class="label">Emitida</span><span class="v">{{doc.date}}</span>
+      {{#doc.dueDate}}<span class="label">Vence</span><span class="v">{{doc.dueDate}}</span>{{/doc.dueDate}}
+      {{#doc.ncf}}<span class="label">NCF</span><span class="v num">{{doc.ncf}}</span>{{/doc.ncf}}
+      <span class="label">Estado</span><span class="v"><span class="pill {{doc.statusTone}}">{{doc.statusLabel}}</span></span>
+    </div>
+  </div>
+
+  <table class="items">
+    <thead>
+      <tr><th>Artículo</th><th class="r opt">Precio</th><th class="c opt">Cant.</th><th class="r">Importe</th></tr>
+    </thead>
+    <tbody>
+      {{#items}}
+      <tr>
+        <td>
+          <div class="item-name">{{name}}</div>
+          {{#detail}}<div class="item-sub">{{detail}}</div>{{/detail}}
+          <div class="item-calc num">{{quantity}} × {{price}}</div>
+        </td>
+        <td class="r num opt">{{price}}</td>
+        <td class="c num opt">{{quantity}}</td>
+        <td class="r num">{{total}}</td>
+      </tr>
+      {{/items}}
+    </tbody>
+  </table>
+
+  <div class="totals-wrap blk">
+    <div class="totals">
+      <table>
+        <tr><td class="muted">Subtotal</td><td class="num">{{totals.subtotal}}</td></tr>
+        {{#totals.discount}}<tr><td class="muted">Descuento</td><td class="num">−{{totals.discount}}</td></tr>{{/totals.discount}}
+        {{#totals.tax}}<tr><td class="muted">{{totals.taxLabel}}</td><td class="num">{{totals.tax}}</td></tr>{{/totals.tax}}
+        <tr class="grand"><td>Total</td><td class="num">{{totals.total}}</td></tr>
+        {{#totals.paid}}<tr><td class="muted">Pagado</td><td class="num">{{totals.paid}}</td></tr>{{/totals.paid}}
+      </table>
+      {{#balance}}
+      <div class="balance">
+        <span class="k">Saldo pendiente{{#balance.due}}<span class="due">Vence {{balance.due}}</span>{{/balance.due}}</span>
+        <span class="v num">{{balance.amount}}</span>
+      </div>
+      {{/balance}}
+      {{#paidStamp}}<div class="stamp">PAGADA</div>{{/paidStamp}}
+    </div>
+  </div>
+
+  {{#payments.length}}
+  <div class="section blk">
+    <h3>Pagos recibidos</h3>
+    <table class="pays">
+      {{#payments.rows}}
+      <tr><td>{{date}} · {{method}}{{#reference}} <span class="muted small">Ref. {{reference}}</span>{{/reference}}</td><td class="num">{{amount}}</td></tr>
+      {{/payments.rows}}
+    </table>
+  </div>
+  {{/payments.length}}
+
+  {{#payTo}}
+  <div class="section blk">
+    <h3>Dónde pagar</h3>
+    {{#payTo.hasAccounts}}
+    <div class="accounts">
+      {{#payTo.accounts}}
+      <div class="account">
+        <div class="bank">{{bank}}</div>
+        <div class="small muted">{{type}}</div>
+        <div class="number num">{{number}}</div>
+        {{#holderName}}<div class="small">{{holderName}}{{#holderId}} · {{holderId}}{{/holderId}}</div>{{/holderName}}
+      </div>
+      {{/payTo.accounts}}
+    </div>
+    {{/payTo.hasAccounts}}
+    {{#payTo.note}}<div class="note">{{payTo.note}}</div>{{/payTo.note}}
+  </div>
+  {{/payTo}}
+
+  {{#saleNote}}
+  <div class="section blk">
+    <h3>Nota</h3>
+    <div class="terms">{{saleNote}}</div>
+  </div>
+  {{/saleNote}}
+
+  {{#terms}}
+  <div class="section blk">
+    <div class="terms">{{terms}}</div>
+  </div>
+  {{/terms}}
+
+  {{#signature}}
+  <div class="sign blk">
+    <div class="who">{{signature.name}}</div>
+    <div class="art">{{{signature.svg}}}</div>
+    <div class="line">{{signature.date}}</div>
+  </div>
+  {{/signature}}
+
+  {{#footer}}<div class="thanks blk">{{footer}}</div>{{/footer}}
+
+  <div class="brand blk">
+    <span class="mark">{{#brandMark}}<img src="{{brandMark}}" alt="">{{/brandMark}}Generada con Invoicer by PayBille</span>
+    <span class="doc">{{doc.kindLabel}} #{{doc.number}}</span>
+  </div>
+
+</div>
+</body>
+</html>

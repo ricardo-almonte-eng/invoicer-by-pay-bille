@@ -26,6 +26,9 @@ import com.paybille.invoicer.feature.clients.presentation.ClientDetailScreenMode
 import com.paybille.invoicer.feature.clients.presentation.ClientEditorScreenModel
 import com.paybille.invoicer.feature.clients.presentation.ClientsScreenModel
 import com.paybille.invoicer.feature.detail.data.InvoicePdfStore
+import com.paybille.invoicer.feature.document.data.InvoiceDocumentRemote
+import com.paybille.invoicer.feature.document.data.InvoiceDocumentRepository
+import com.paybille.invoicer.feature.document.presentation.InvoiceSettingsScreenModel
 import com.paybille.invoicer.feature.detail.data.ReceivablesRepository
 import com.paybille.invoicer.feature.detail.data.SaleDetailRepository
 import com.paybille.invoicer.feature.detail.data.remote.DetailRemoteDataSource
@@ -115,7 +118,7 @@ private val invoiceModule = module {
     single { InvoiceRepository(dao = get(), payToMemory = CachedPayToMemory(get())) }
     single {
         val sessions = get<SessionRepository>()
-        val pdfs = get<InvoicePdfStore>()
+        val documents = get<InvoiceDocumentRepository>()
         val receivables = get<ReceivablesRepository>()
         InvoiceSender(
             dao = get(),
@@ -123,9 +126,11 @@ private val invoiceModule = module {
             sales = get(),
             currentSession = { sessions.currentSession() },
             afterSent = { saleId, onCredit ->
-                // La "factura grande" queda lista para verla y compartirla sin esperar.
-                runCatching { pdfs.ensure(saleId) }
-                if (onCredit) sessions.currentSession()?.let { runCatching { receivables.refresh(it.idMarket) } }
+                // Los datos de la factura quedan en el teléfono: se ve al instante y sin red.
+                sessions.currentSession()?.let { session ->
+                    runCatching { documents.refresh(session.idMarket, saleId) }
+                    if (onCredit) runCatching { receivables.refresh(session.idMarket) }
+                }
             },
         )
     }
@@ -139,6 +144,9 @@ private val invoiceModule = module {
 private val detailModule = module {
     singleOf(::DetailRemoteDataSource)
     singleOf(::InvoicePdfStore)
+    singleOf(::InvoiceDocumentRemote)
+    singleOf(::InvoiceDocumentRepository)
+    factoryOf(::InvoiceSettingsScreenModel)
     single {
         val sessions = get<SessionRepository>()
         ReceivablesRepository(
@@ -155,6 +163,7 @@ private val detailModule = module {
             sessions = get(),
             details = get(),
             pdfs = get(),
+            documents = get(),
             platform = get(),
             invoices = get(),
             sender = get(),

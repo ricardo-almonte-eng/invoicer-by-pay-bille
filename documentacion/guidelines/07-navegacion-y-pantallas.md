@@ -17,8 +17,9 @@ App()                                   Tema + pantalla según SessionRepository
     Pantallas que se apilan encima (navigator.push):
     ├── InvoiceEditorScreen(kind) ✅     Editor de factura y cotización (destino del "+")
     ├── ProductPickerScreen / ClientPickerScreen ✅  buscadores del editor (con alta rápida)
-    ├── SaleDetailScreen(saleId | localId) ✅  detalle: PDF, cobro, vencimiento, abonos
-    ├── PdfViewerScreen(path) ✅         el PDF a pantalla completa
+    ├── SaleDetailScreen(saleId | localId) ✅  detalle: factura (HTML), cobro, vencimiento, abonos
+    ├── InvoiceViewerScreen(saleId, html) ✅  la factura a pantalla completa (scroll y zoom)
+    ├── InvoiceSettingsScreen ✅         Mi perfil → "Diseño de factura" (invoiceconfig)
     ├── ProductDetailScreen(idProduct) ✅ / ProductEditorScreen(idProduct?, pickFor?) ✅
     ├── ClientDetailScreen(id, name?) ✅ / ClientEditorScreen(id?, pickFor?) ✅
     ├── BankAccountDetailScreen(id) ✅ / BankAccountEditorScreen(id?) ✅
@@ -120,13 +121,22 @@ a Inicio · Flujo de caja · Más, y a las "cuatro pestañas y nada más" de ant
 
 ### Configuración de la tienda (Mi perfil → "Configurar tienda")
 
-Versión reducida de `configuracion/tienda.vue`. Entra **lo que el cliente ve en la factura** (el
-PDF del servidor pinta logo, nombre, dirección, RNC, teléfono y correo) y **el impuesto con el que
+Versión reducida de `configuracion/tienda.vue`. Entra **lo que el cliente ve en la factura** (la
+factura pinta logo, nombre, dirección, RNC, teléfono y correo) y **el impuesto con el que
 nace cada factura** (cómo se cobra, ITBIS/IVA y tasa). Queda en el POS: banco, garantía, redes,
 parámetros del sistema, impresora, zona horaria y NCF. Se abre con lo guardado en el teléfono y
 se completa con `markets/{id}` (el correo no está en Room); sin red se ve pero no se guarda. Al
 guardar se sube el logo (si cambió), `PUT markets` con esos campos y `refreshProfile()`. Las
-facturas ya emitidas no cambian: su PDF se guardó la primera vez.
+facturas ya emitidas **también** cambian: la app las genera al abrirlas (desde 2026-10-06).
+
+### Diseño de factura (Mi perfil → "Diseño de factura") ✅
+
+`invoiceconfig` de la tienda (sql/F5): título, color de acento, logo y datos del negocio, datos y
+contacto del cliente, vencimiento, NCF, impuesto, saldo, pagos recibidos, dónde pagar,
+instrucciones (y las de por defecto), condiciones, firma (lienzo + nombre) y mensaje final.
+Arriba, una **factura de ejemplo** (a crédito con un abono, para que se vean todas las secciones)
+que se rehace 300 ms después de cada cambio; tocarla abre el visor. Abre con lo guardado en el
+teléfono y lo refresca con `GET invoiceConfig/{IdMarket}`; guardar (`POST`, upsert) necesita red.
 
 ### Resumen (el dashboard del POS, `pages/index.vue`)
 
@@ -256,8 +266,8 @@ Reglas heredadas del rediseño del POS (`PayBille_POS/CLAUDE.md`, 2026-09-01):
 
 ```
 Barra:     ← Factura #CO2026…                [descargar] [compartir]
-HERO:      la "factura grande" en PDF, centrada, hasta 420 dp de ancho
-           (toca → PdfViewerScreen con todas las páginas)
+HERO:      la factura (HTML generado en el teléfono) en una hoja A4, hasta 420 dp de ancho
+           (toca → InvoiceViewerScreen, con scroll y zoom)
            [Compartir]  (lleno)
            [Descargar PDF]  (contorno)
 Cobro:     estatus · Total · Pagado · SALDO PENDIENTE · "Vence en 3 días" / "Vencida hace 5"
@@ -269,15 +279,17 @@ Detalle:   cliente · fecha · NCF · líneas · subtotal/impuesto/total · cóm
 
 - Se abre desde una fila de Facturas (`saleId`), desde un aviso de vencimiento, o **al guardar en
   el editor** (`localId`): entonces espera en la cola y, cuando el envío llega, carga la factura
-  y su PDF solo.
-- **El PDF es el del servidor** (`GET ventas/factura/{id}`), descargado a la carpeta privada de
-  la app. Sin red y sin copia, lo dice y ofrece reintentar.
+  y su factura sola.
+- **La factura la genera el teléfono** con `GET ventas/factura/{id}/data` (guardado en
+  `cached_payloads`) y el diseño de la tienda → [06](06-componentes-ui.md). Se pinta al instante
+  con lo guardado; sin red y sin copia, lo dice y ofrece reintentar. Compartir y Descargar generan
+  el PDF en ese momento (menos de un segundo) con lo que se ve.
 - **Compartir** abre la hoja del sistema (Android: `FileProvider` + `ACTION_SEND`; iOS:
   `UIActivityViewController`). **Descargar**: Android 10+ lo guarda en *Descargas*; Android 9 o
   menos, por la hoja de compartir; iOS abre el selector de *Archivos*.
 - **Registrar pago:** monto (prellenado con el saldo), método, cuenta y referencia. Lo
   recalcula el servidor; tras pagar se relee la factura, la fila del Inicio y los avisos.
-- ⚠️ Tras un abono, **el PDF del servidor puede seguir con el saldo anterior** (petición 7).
+- Tras un abono se vuelven a pedir los datos: la factura enseña el saldo nuevo enseguida.
 - Anular y nota de crédito: pendientes (fase 5).
 
 ## Dónde pagar (editor) ✅

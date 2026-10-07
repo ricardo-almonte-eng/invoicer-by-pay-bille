@@ -319,6 +319,11 @@ cuenta a mano. Es la misma clase de trampa que la tasa de impuesto como string (
 
 ### Qué se imprime en el PDF
 
+> **Estado (2026-10-06):** la factura ya la genera el teléfono (`InvoiceHtml`), pero la moneda y la
+> tasa todavía **no** se archivan contra el `id` de la venta (casilla abierta en
+> [11](11-plan-de-implementacion.md)), así que sale en moneda base, como salía la del servidor.
+> Archivarlas y pasarlas a `InvoiceHtml.model` es lo que falta para las tres líneas de abajo.
+
 Un comprobante en moneda extranjera lleva **las tres líneas**, o no hay forma de auditarlo:
 
 ```

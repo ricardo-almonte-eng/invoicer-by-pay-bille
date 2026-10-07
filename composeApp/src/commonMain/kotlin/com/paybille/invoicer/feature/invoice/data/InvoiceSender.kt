@@ -75,7 +75,7 @@ class InvoiceSender(
     private val sales: SalesRepository,
     /** Sesión abierta, o `null` si no hay (entonces no se envía nada). */
     private val currentSession: suspend () -> Session?,
-    /** Tras enviar: descargar el PDF, poner al día los vencimientos… Nunca hace fallar el envío. */
+    /** Tras enviar: traer los datos de la factura, poner al día los vencimientos… Nunca hace fallar el envío. */
     private val afterSent: suspend (saleId: Int, onCredit: Boolean) -> Unit = { _, _ -> },
 ) {
     private val running = Mutex()

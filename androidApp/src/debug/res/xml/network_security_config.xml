@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Solo en debug. HTTP sin cifrar ÚNICAMENTE hacia la API local:
+     `adb reverse tcp:2001 tcp:2001` + -Ppaybille.apiBaseUrl=http://localhost:2001/ventex/api
+     (o 10.0.2.2, el host visto desde el emulador). Todo lo demás sigue exigiendo HTTPS. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
