@@ -6,10 +6,13 @@ import com.paybille.invoicer.core.platform.IosNotificationDelegate
 import platform.UIKit.UIViewController
 import platform.UserNotifications.UNUserNotificationCenter
 
+// Referencia fuerte: `UNUserNotificationCenter.delegate` es `weak`.
+private val notificationDelegate = IosNotificationDelegate()
+
 // Koin se arranca una sola vez aunque SwiftUI vuelva a crear el controlador.
 private val koin by lazy {
     // El toque en un aviso llega por este delegado (abre la factura).
-    UNUserNotificationCenter.currentNotificationCenter().delegate = IosNotificationDelegate
+    UNUserNotificationCenter.currentNotificationCenter().delegate = notificationDelegate
     initKoin()
 }
 

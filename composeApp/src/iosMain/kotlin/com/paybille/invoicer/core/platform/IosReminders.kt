@@ -53,9 +53,11 @@ private const val SALE_KEY = "saleId"
 
 /**
  * Recibe el toque en un aviso y deja la venta en [NotificationRouter]. Se registra en
- * `MainViewController`; el objeto vive lo que la app (el centro lo guarda como `weak`).
+ * `MainViewController`, que guarda la única instancia en una propiedad de nivel superior: el
+ * centro la guarda como `weak`. Es `class` y no `object`: Kotlin/Native no admite un `object`
+ * que herede de una clase Obj-C (el enlazador del framework revienta).
  */
-object IosNotificationDelegate : NSObject(), UNUserNotificationCenterDelegateProtocol {
+class IosNotificationDelegate : NSObject(), UNUserNotificationCenterDelegateProtocol {
     override fun userNotificationCenter(
         center: UNUserNotificationCenter,
         didReceiveNotificationResponse: UNNotificationResponse,

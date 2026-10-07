@@ -135,9 +135,10 @@ Detalle del flujo → [12-flujo-de-trabajo.md](documentacion/guidelines/12-flujo
   (artefacto). Primer `compileKotlinIosArm64` real: faltaban imports de **extensiones** de
   Kotlin/Native (categorías ObjC): `kotlinx.cinterop.readValue`,
   `platform.UIKit.popoverPresentationController`, `platform.UIKit.viewPrintFormatter`. Añadidos.
-- **Estado:** imports corregidos; falta el siguiente build en TeamCity. **Ojo:** el commit local
-  `f419002 Make gradlew executable` (sin publicar) borró por error la feature de factura HTML del
-  índice (44 archivos); los archivos siguen en disco. Rehacerlo antes de `push`.
+- **Estado:** `compileKotlinIosArm64` ya pasa. Luego falló `linkDebugFrameworkIosArm64`: un
+  `object` que hereda de `NSObject` revienta el backend de K/N → `IosNotificationDelegate` es
+  `class` y `MainViewController` guarda la instancia (el delegado del centro es `weak`).
+  Pendiente del siguiente build en TeamCity.
 - **Qué mirar:** si compila, instalar el IPA y probar `HtmlView`, PDF (`IosHtmlPdf`) y compartir
   en iPhone (y popover en iPad).
 
