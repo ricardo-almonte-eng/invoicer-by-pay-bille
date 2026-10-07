@@ -24,6 +24,7 @@ import platform.UIKit.UIDocumentPickerViewController
 import platform.UIKit.UIImagePNGRepresentation
 import platform.UIKit.UIScreen
 import platform.UIKit.UIViewController
+import platform.UIKit.popoverPresentationController
 import platform.darwin.dispatch_async
 import platform.darwin.dispatch_get_main_queue
 import platform.posix.memcpy

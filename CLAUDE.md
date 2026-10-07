@@ -126,6 +126,21 @@ Detalle del flujo → [12-flujo-de-trabajo.md](documentacion/guidelines/12-flujo
 
 ## Contexto activo
 
+### 2026-10-06 (2) — IPA de iOS en TeamCity Cloud (sin Mac)
+- **Problema del usuario:** sin Mac, quiere compilar iOS en TeamCity Cloud y sacar un `.ipa` para
+  su iPhone (lo firma e instala Sideloadly desde Windows con Apple ID gratis, 7 días).
+- **Qué se hizo:** build en agente macOS alojado (requirement `teamcity.agent.jvm.os.name`
+  contiene `Mac`), paso Command Line: `chmod +x gradlew` + `xcodebuild -sdk iphoneos` con
+  `CODE_SIGNING_ALLOWED=NO` → `Payload/Invoicer.app` → `InvoicerByPayBille-unsigned.ipa`
+  (artefacto). Primer `compileKotlinIosArm64` real: faltaban imports de **extensiones** de
+  Kotlin/Native (categorías ObjC): `kotlinx.cinterop.readValue`,
+  `platform.UIKit.popoverPresentationController`, `platform.UIKit.viewPrintFormatter`. Añadidos.
+- **Estado:** imports corregidos; falta el siguiente build en TeamCity. **Ojo:** el commit local
+  `f419002 Make gradlew executable` (sin publicar) borró por error la feature de factura HTML del
+  índice (44 archivos); los archivos siguen en disco. Rehacerlo antes de `push`.
+- **Qué mirar:** si compila, instalar el IPA y probar `HtmlView`, PDF (`IosHtmlPdf`) y compartir
+  en iPhone (y popover en iPad).
+
 ### 2026-10-06 — Factura generada en la app (plantilla HTML por tienda)
 - **Problema del usuario:** la factura PDF que arma el backend (Puppeteer) tarda y falla al
   mostrarse. Quiere un endpoint que devuelva solo los **datos** y que la app la genere, con un
@@ -165,17 +180,3 @@ Detalle del flujo → [12-flujo-de-trabajo.md](documentacion/guidelines/12-flujo
   titular/cédula; campana con una vencida, una de hoy y un envío rechazado; catálogo: compartir,
   ver, marcar sin red; `/catalogo/<tienda>` en móvil y escritorio, claro y oscuro; 360 dp y letra
   grande en el editor y el catálogo.
-
-### 2026-09-27 (3) — Listas separadas y facturas con saldo y vencimiento
-- **Problema del usuario:** las filas de las listas solo se separan por una línea; quiere
-  distinguirlas más. En Facturas, cada fila debe mostrar cliente, lo que se debe y el vencimiento
-  con los días que faltan, con un indicador de vencida o por vencer.
-- **Qué se hizo:** `PbListCard` (isla por fila, 10 dp entre tarjetas, franja `accent` opcional);
-  `PbItemRow`, `SaleRow`, `PendingRow` y las filas de los buscadores la usan. `SaleRow`: cliente
-  como título, total y estatus; con `RowDebt` (de `receivables`) añade "DEBE", vencimiento con días
-  y la etiqueta Vencida / Por vencer / Vence hoy. Regla en `DueState.urgency()` con
-  `DUE_SOON_DAYS = 3` (los días de los avisos).
-- **Estado:** compila en Android sin avisos; **82 pruebas** en verde.
-- **Qué mirar:** listas a 360 dp y letra grande (tarjetas, importes que bajan de línea); tema
-  oscuro (franja y etiquetas); una factura vencida, una que vence hoy, otra en 2 días, otra en 10;
-  una pagada (sin bloque "DEBE").

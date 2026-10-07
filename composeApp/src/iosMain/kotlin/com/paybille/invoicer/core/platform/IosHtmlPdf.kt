@@ -18,6 +18,7 @@ import platform.UIKit.UIGraphicsEndPDFContext
 import platform.UIKit.UIGraphicsGetPDFContextBounds
 import platform.UIKit.UIPrintPageRenderer
 import platform.UIKit.valueWithCGRect
+import platform.UIKit.viewPrintFormatter
 import platform.WebKit.WKNavigation
 import platform.WebKit.WKNavigationDelegateProtocol
 import platform.WebKit.WKWebView
